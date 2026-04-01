@@ -14,7 +14,16 @@ import {
   Target,
   Filter,
   FileDown,
-  X
+  X,
+  Plus,
+  Calendar,
+  History,
+  FileText,
+  Trash2,
+  Download,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -36,6 +45,35 @@ import {
 } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  onAuthStateChanged, 
+  signOut,
+  User
+} from 'firebase/auth';
+import { 
+  getFirestore, 
+  collection, 
+  addDoc, 
+  query, 
+  where, 
+  onSnapshot, 
+  orderBy, 
+  deleteDoc, 
+  doc,
+  Timestamp,
+  getDocFromServer
+} from 'firebase/firestore';
+import firebaseConfig from '../firebase-applet-config.json';
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+const auth = getAuth(app);
+const googleProvider = new GoogleAuthProvider();
 
 // Types
 interface GSCRow {
@@ -98,10 +136,86 @@ export default function App() {
   const [expandedEnrichmentPage, setExpandedEnrichmentPage] = useState<string | null>(null);
   const [expandedZeroPage, setExpandedZeroPage] = useState<string | null>(null);
   const [expandedLhfPage, setExpandedLhfPage] = useState<string | null>(null);
+  const [currentTab, setCurrentTab] = useState<'dashboard' | 'tracker'>('dashboard');
+  const [user, setUser] = useState<User | null>(null);
+  const [seoLogs, setSeoLogs] = useState<any[]>([]);
+  const [isAddingLog, setIsAddingLog] = useState(false);
+  const [selectedAspects, setSelectedAspects] = useState<string[]>([]);
+  const [logFilterMonth, setLogFilterMonth] = useState<string>(new Date().toISOString().slice(0, 7));
+  const [logSearchQuery, setLogSearchQuery] = useState('');
   const [expandedAiPage, setExpandedAiPage] = useState<string | null>(null);
   const [expandedScrollPage, setExpandedScrollPage] = useState<string | null>(null);
   const [expandedErPage, setExpandedErPage] = useState<string | null>(null);
   const [expandedCtaPage, setExpandedCtaPage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setUser(user);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setSeoLogs([]);
+      return;
+    }
+
+    const q = query(
+      collection(db, 'logs'),
+      where('uid', '==', user.uid),
+      orderBy('date', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const logs = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setSeoLogs(logs);
+    }, (error) => {
+      console.error("Firestore Error: ", error);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  const handleLogin = async () => {
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (err) {
+      console.error("Login Error:", err);
+      setError("Failed to login with Google.");
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      await fetch('/api/auth/logout', { method: 'POST' });
+      setIsConnected(false);
+      setSites([]);
+      setData([]);
+      setSelectedSite(null);
+      setViewState('login');
+    } catch (err) {
+      console.error("Logout Error:", err);
+    }
+  };
+
+  const testConnection = async () => {
+    try {
+      await getDocFromServer(doc(db, 'test', 'connection'));
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('the client is offline')) {
+        console.error("Please check your Firebase configuration. ");
+      }
+    }
+  };
+
+  useEffect(() => {
+    testConnection();
+  }, []);
   const [selectedCtaPages, setSelectedCtaPages] = useState<Set<string>>(new Set());
   const [selectedScrollPages, setSelectedScrollPages] = useState<Set<string>>(new Set());
   const [selectedErPages, setSelectedErPages] = useState<Set<string>>(new Set());
@@ -938,14 +1052,6 @@ export default function App() {
     }
   };
 
-  const handleLogout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' });
-    setIsConnected(false);
-    setSites([]);
-    setData([]);
-    setSelectedSite(null);
-    setViewState('login');
-  };
 
   useEffect(() => {
     if (selectedSite && viewState === 'dashboard') {
@@ -1784,63 +1890,195 @@ export default function App() {
   const auditRows = getAuditData();
   const ctrStats = getCTRStats();
 
+  const handleAddLog = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!user) return;
+
+    const formData = new FormData(e.currentTarget);
+    const aspects = Array.from(formData.getAll('aspect')) as string[];
+    
+    const beforeParts: string[] = [];
+    const afterParts: string[] = [];
+    
+    aspects.forEach(aspect => {
+      const b = formData.get(`before_${aspect}`) as string;
+      const a = formData.get(`after_${aspect}`) as string;
+      if (b) beforeParts.push(`${aspect}: ${b}`);
+      if (a) afterParts.push(`${aspect}: ${a}`);
+    });
+
+    const newLog = {
+      uid: user.uid,
+      url: formData.get('url') as string,
+      date: formData.get('date') as string,
+      aspect: aspects,
+      queries: formData.get('queries') as string,
+      before: beforeParts.join('\n'),
+      after: afterParts.join('\n'),
+      note: formData.get('note') as string,
+      createdAt: new Date().toISOString()
+    };
+
+    try {
+      await addDoc(collection(db, 'logs'), newLog);
+      setIsAddingLog(false);
+      setSelectedAspects([]);
+    } catch (err) {
+      console.error("Error adding log:", err);
+      alert("Gagal menyimpan log. Periksa konsol untuk detailnya.");
+    }
+  };
+
+  const handleDeleteLog = async (id: string) => {
+    if (!window.confirm("Apakah Anda yakin ingin menghapus log ini?")) return;
+    try {
+      await deleteDoc(doc(db, 'logs', id));
+    } catch (err) {
+      console.error("Error deleting log:", err);
+    }
+  };
+
+  const exportLogsToCSV = () => {
+    const headers = ["Tanggal", "URL", "Aspek", "Query", "Sebelum", "Sesudah", "Catatan"];
+    const rows = filteredLogs.map(log => [
+      log.date,
+      log.url,
+      log.aspect.join(', '),
+      log.queries,
+      log.before.replace(/\n/g, ' '),
+      log.after.replace(/\n/g, ' '),
+      log.note.replace(/\n/g, ' ')
+    ]);
+
+    const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `seo_logs_${logFilterMonth}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const exportLogsToPDF = () => {
+    const doc = new jsPDF();
+    doc.text(`Laporan Aksi SEO - ${logFilterMonth}`, 14, 15);
+    
+    const tableData = filteredLogs.map(log => [
+      log.date,
+      log.url,
+      log.aspect.join(', '),
+      log.queries,
+      log.before,
+      log.after
+    ]);
+
+    autoTable(doc, {
+      head: [['Tanggal', 'URL', 'Aspek', 'Query', 'Sebelum', 'Sesudah']],
+      body: tableData,
+      startY: 20,
+      styles: { fontSize: 8 },
+      columnStyles: {
+        0: { cellWidth: 20 },
+        1: { cellWidth: 40 },
+        2: { cellWidth: 30 },
+        3: { cellWidth: 30 },
+        4: { cellWidth: 30 },
+        5: { cellWidth: 30 }
+      }
+    });
+
+    doc.save(`seo_report_${logFilterMonth}.pdf`);
+  };
+
+  const filteredLogs = seoLogs.filter(log => {
+    const matchesSearch = log.url.toLowerCase().includes(logSearchQuery.toLowerCase()) || 
+                         log.queries.toLowerCase().includes(logSearchQuery.toLowerCase()) ||
+                         log.note.toLowerCase().includes(logSearchQuery.toLowerCase());
+    const matchesMonth = log.date.startsWith(logFilterMonth);
+    return matchesSearch && matchesMonth;
+  });
+
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 font-sans">
-      {/* Sidebar / Header */}
+      {/* Header */}
       <header className="border-b border-gray-200 bg-white/80 backdrop-blur-xl sticky top-0 z-50">
         <div className="max-w-[1600px] mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-600/20">
-              <Search className="w-5 h-5 text-white" />
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-600/20">
+                <BarChart3 className="w-5 h-5 text-white" />
+              </div>
+              <h1 className="font-bold text-lg hidden md:block">SEO HUB</h1>
             </div>
-            <h1 className="font-bold text-lg hidden md:block">SEO Audit Ultimate</h1>
-            
-            <div className="h-6 w-px bg-gray-200 mx-2 hidden md:block" />
-            
-            <button 
-              onClick={() => setViewState('select')}
-              className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm hover:border-emerald-500/50 transition-colors shadow-sm"
-            >
-              <Globe className="w-4 h-4 text-emerald-600" />
-              <span className="font-medium truncate max-w-[150px] md:max-w-md">{selectedSite}</span>
-              <ChevronRight className="w-3 h-3 rotate-90" />
-            </button>
+
+            <nav className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl">
+              <button 
+                onClick={() => setCurrentTab('dashboard')}
+                className={cn(
+                  "px-4 py-1.5 rounded-lg text-sm font-bold transition-all",
+                  currentTab === 'dashboard' ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-900"
+                )}
+              >
+                Performa
+              </button>
+              <button 
+                onClick={() => setCurrentTab('tracker')}
+                className={cn(
+                  "px-4 py-1.5 rounded-lg text-sm font-bold transition-all",
+                  currentTab === 'tracker' ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-900"
+                )}
+              >
+                Pelacak Aksi
+              </button>
+            </nav>
           </div>
 
           <div className="flex items-center gap-4">
-            <div className="hidden lg:flex items-center gap-3">
-              <div className="flex items-center gap-2 bg-gray-100 border border-gray-200 rounded-lg p-1">
-                <div className="flex items-center gap-2 px-2">
-                  <div className="flex flex-col">
-                    <span className={cn(
-                      "text-[9px] uppercase font-black leading-none mb-0.5",
-                      isMainRecent ? "text-emerald-600" : "text-amber-600"
-                    )}>
-                      {isMainRecent ? 'Current' : 'Previous'}
-                    </span>
-                    <input 
-                      type="date" 
-                      value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
-                      className="bg-transparent text-xs text-gray-700 focus:outline-none font-bold"
-                    />
-                  </div>
-                </div>
-                <div className="w-px h-6 bg-gray-200" />
-                <div className="flex items-center gap-2 px-2">
-                  <div className="flex flex-col">
-                    <span className="text-[9px] text-gray-400 uppercase font-black leading-none mb-0.5">End</span>
-                    <input 
-                      type="date" 
-                      value={endDate}
-                      onChange={(e) => setEndDate(e.target.value)}
-                      className="bg-transparent text-xs text-gray-700 focus:outline-none font-bold"
-                    />
-                  </div>
-                </div>
-              </div>
+            {currentTab === 'dashboard' && (
+              <div className="hidden lg:flex items-center gap-3">
+                <button 
+                  onClick={() => setViewState('select')}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm hover:border-emerald-500/50 transition-colors shadow-sm"
+                >
+                  <Globe className="w-4 h-4 text-emerald-600" />
+                  <span className="font-medium truncate max-w-[150px] md:max-w-md">{selectedSite}</span>
+                  <ChevronRight className="w-3 h-3 rotate-90" />
+                </button>
 
-              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 bg-gray-100 border border-gray-200 rounded-lg p-1">
+                  <div className="flex items-center gap-2 px-2">
+                    <div className="flex flex-col">
+                      <span className={cn(
+                        "text-[9px] uppercase font-black leading-none mb-0.5",
+                        isMainRecent ? "text-emerald-600" : "text-amber-600"
+                      )}>
+                        {isMainRecent ? 'Current' : 'Previous'}
+                      </span>
+                      <input 
+                        type="date" 
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        className="bg-transparent text-xs text-gray-700 focus:outline-none font-bold"
+                      />
+                    </div>
+                  </div>
+                  <div className="w-px h-6 bg-gray-200" />
+                  <div className="flex items-center gap-2 px-2">
+                    <div className="flex flex-col">
+                      <span className="text-[9px] text-gray-400 uppercase font-black leading-none mb-0.5">End</span>
+                      <input 
+                        type="date" 
+                        value={endDate}
+                        onChange={(e) => setEndDate(e.target.value)}
+                        className="bg-transparent text-xs text-gray-700 focus:outline-none font-bold"
+                      />
+                    </div>
+                  </div>
+                </div>
+
                 <button 
                   onClick={() => setIsComparing(!isComparing)}
                   className={cn(
@@ -1853,167 +2091,130 @@ export default function App() {
                   <RefreshCw className={cn("w-3 h-3", isComparing && "animate-spin-once")} />
                   {isComparing ? 'Comparing' : 'Compare'}
                 </button>
-                
-                {isComparing && (
-                  <>
-                    <button
-                      onClick={() => {
-                        const s = startDate;
-                        const e = endDate;
-                        setStartDate(compareStartDate);
-                        setEndDate(compareEndDate);
-                        setCompareStartDate(s);
-                        setCompareEndDate(e);
-                      }}
-                      className="p-2 hover:bg-gray-100 rounded-lg text-gray-400 transition-colors border border-gray-200 bg-white"
-                      title="Swap periods"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                    </button>
-                    <div className="flex items-center gap-2 bg-gray-100 border border-gray-200 rounded-lg p-1 animate-in fade-in slide-in-from-left-2">
-                      <div className="flex items-center gap-2 px-2">
-                        <div className="flex flex-col">
-                          <span className={cn(
-                            "text-[9px] uppercase font-black leading-none mb-0.5",
-                            !isMainRecent ? "text-emerald-600" : "text-amber-600"
-                          )}>
-                            {!isMainRecent ? 'Current' : 'Previous'}
-                          </span>
-                          <input 
-                            type="date" 
-                            value={compareStartDate}
-                            onChange={(e) => setCompareStartDate(e.target.value)}
-                            className="bg-transparent text-xs text-gray-700 focus:outline-none font-bold"
-                          />
-                        </div>
-                      </div>
-                      <div className="w-px h-6 bg-gray-200" />
-                      <div className="flex items-center gap-2 px-2">
-                        <div className="flex flex-col">
-                          <span className="text-[9px] text-gray-400 uppercase font-black leading-none mb-0.5">End</span>
-                          <input 
-                            type="date" 
-                            value={compareEndDate}
-                            onChange={(e) => setCompareEndDate(e.target.value)}
-                            className="bg-transparent text-xs text-gray-700 focus:outline-none font-bold"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </>
-                )}
+              </div>
+            )}
+
+            <div className="flex items-center gap-2">
+              {currentTab === 'dashboard' && (
+                <button 
+                  onClick={() => selectedSite && fetchData(selectedSite)}
+                  disabled={isFetchingData}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50 text-gray-600"
+                >
+                  <RefreshCw className={cn("w-5 h-5", isFetchingData && "animate-spin")} />
+                </button>
+              )}
+              <div className="h-8 w-px bg-gray-200 mx-2" />
+              <div className="flex items-center gap-3">
+                <div className="flex flex-col items-end">
+                  <span className="text-xs font-bold text-gray-900">{user?.displayName}</span>
+                  <span className="text-[10px] text-gray-400">{user?.email}</span>
+                </div>
+                <button 
+                  onClick={handleLogout}
+                  className="p-2 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded-lg transition-colors"
+                >
+                  <LogOut className="w-5 h-5" />
+                </button>
               </div>
             </div>
-
-            <button 
-              onClick={() => selectedSite && fetchData(selectedSite)}
-              disabled={isFetchingData}
-              className="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50 text-gray-600"
-            >
-              <RefreshCw className={cn("w-5 h-5", isFetchingData && "animate-spin")} />
-            </button>
-            <button 
-              onClick={handleLogout}
-              className="flex items-center gap-2 px-3 py-1.5 hover:bg-red-50 text-red-600 rounded-lg transition-colors text-sm font-medium"
-            >
-              <LogOut className="w-4 h-4" />
-              <span className="hidden sm:inline">Logout</span>
-            </button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-[1600px] mx-auto p-6 space-y-8">
-        {error && (
-          <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-3 text-red-400">
-            <AlertCircle className="w-5 h-5" />
-            {error}
-          </div>
-        )}
-
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[
-            { 
-              label: 'Total clicks', 
-              value: totalClicks >= 1000 ? `${(totalClicks/1000).toFixed(2)}K` : totalClicks.toLocaleString(), 
-              prevValue: compClicks >= 1000 ? `${(compClicks/1000).toFixed(2)}K` : compClicks.toLocaleString(),
-              icon: MousePointer2, 
-              iconColor: 'text-[#4285f4]',
-              currentRaw: totalClicks, 
-              prevRaw: compClicks 
-            },
-            { 
-              label: 'Total impressions', 
-              value: totalImpressions >= 1000 ? `${(totalImpressions/1000).toFixed(0)}K` : totalImpressions.toLocaleString(), 
-              prevValue: compImpressions >= 1000 ? `${(compImpressions/1000).toFixed(0)}K` : compImpressions.toLocaleString(),
-              icon: Eye, 
-              iconColor: 'text-[#7b1fa2]',
-              currentRaw: totalImpressions, 
-              prevRaw: compImpressions 
-            },
-            { 
-              label: 'Average CTR', 
-              value: `${avgCtr.toFixed(1)}%`, 
-              prevValue: `${compCtr.toFixed(1)}%`,
-              icon: TrendingUp, 
-              iconColor: 'text-[#0097a7]',
-              currentRaw: avgCtr, 
-              prevRaw: compCtr 
-            },
-            { 
-              label: 'Average position', 
-              value: avgPos.toFixed(1), 
-              prevValue: compPos.toFixed(1),
-              icon: BarChart3, 
-              iconColor: 'text-[#ef6c00]',
-              currentRaw: avgPos, 
-              prevRaw: compPos, 
-              inverse: true 
-            }
-          ].map((stat, i) => (
+      <main className="max-w-[1600px] mx-auto p-6">
+        <AnimatePresence mode="wait">
+          {currentTab === 'dashboard' ? (
             <motion.div 
-              key={i}
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: i * 0.05 }}
-              className="p-4 rounded-xl shadow-sm border border-gray-200 bg-white transition-all relative overflow-hidden"
+              key="dashboard"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-8"
             >
-              <div className="flex items-center gap-2 mb-3">
-                <stat.icon className={cn("w-4 h-4", stat.iconColor)} />
-                <span className="text-[11px] font-bold uppercase tracking-wide text-gray-500">{stat.label}</span>
-              </div>
-              
-              <div className="space-y-4">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <div className="text-3xl font-bold leading-none mb-1 text-gray-900">{stat.value}</div>
-                    <div className="text-[10px] text-gray-400 font-medium">
-                      {new Date(isMainRecent ? startDate : compareStartDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'numeric', year: '2-digit' })} - {new Date(isMainRecent ? endDate : compareEndDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'numeric', year: '2-digit' })}
-                    </div>
-                  </div>
-                  {isComparing && stat.currentRaw !== undefined && renderChange(stat.currentRaw, stat.prevRaw, stat.inverse)}
+              {error && (
+                <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-3 text-red-400">
+                  <AlertCircle className="w-5 h-5" />
+                  {error}
                 </div>
+              )}
 
-                {isComparing && (
-                  <div className="pt-3 border-t border-gray-100">
-                    <div className="text-xl font-bold text-gray-600 mb-0.5">{stat.prevValue}</div>
-                    <div className="text-[10px] text-gray-400 font-medium">
-                      {new Date(isMainRecent ? compareStartDate : startDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'numeric', year: '2-digit' })} - {new Date(isMainRecent ? compareEndDate : endDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'numeric', year: '2-digit' })}
+              {/* Stats Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {[
+                  { 
+                    label: 'Total clicks', 
+                    value: totalClicks >= 1000 ? `${(totalClicks/1000).toFixed(2)}K` : totalClicks.toLocaleString(), 
+                    prevValue: compClicks >= 1000 ? `${(compClicks/1000).toFixed(2)}K` : compClicks.toLocaleString(),
+                    icon: MousePointer2, 
+                    iconColor: 'text-[#4285f4]',
+                    currentRaw: totalClicks, 
+                    prevRaw: compClicks 
+                  },
+                  { 
+                    label: 'Total impressions', 
+                    value: totalImpressions >= 1000 ? `${(totalImpressions/1000).toFixed(0)}K` : totalImpressions.toLocaleString(), 
+                    prevValue: compImpressions >= 1000 ? `${(compImpressions/1000).toFixed(0)}K` : compImpressions.toLocaleString(),
+                    icon: Eye, 
+                    iconColor: 'text-[#7b1fa2]',
+                    currentRaw: totalImpressions, 
+                    prevRaw: compImpressions 
+                  },
+                  { 
+                    label: 'Average CTR', 
+                    value: `${avgCtr.toFixed(1)}%`, 
+                    prevValue: `${compCtr.toFixed(1)}%`,
+                    icon: TrendingUp, 
+                    iconColor: 'text-[#0097a7]',
+                    currentRaw: avgCtr, 
+                    prevRaw: compCtr 
+                  },
+                  { 
+                    label: 'Average position', 
+                    value: avgPos.toFixed(1), 
+                    prevValue: compPos.toFixed(1),
+                    icon: BarChart3, 
+                    iconColor: 'text-[#ef6c00]',
+                    currentRaw: avgPos, 
+                    prevRaw: compPos, 
+                    inverse: true 
+                  }
+                ].map((stat, i) => (
+                  <motion.div 
+                    key={i}
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: i * 0.05 }}
+                    className="p-4 rounded-xl shadow-sm border border-gray-200 bg-white transition-all relative overflow-hidden"
+                  >
+                    <div className="flex items-center gap-2 mb-3">
+                      <stat.icon className={cn("w-4 h-4", stat.iconColor)} />
+                      <span className="text-[11px] font-bold uppercase tracking-wide text-gray-500">{stat.label}</span>
                     </div>
-                  </div>
-                )}
-              </div>
+                    
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <div className="text-3xl font-bold leading-none mb-1 text-gray-900">{stat.value}</div>
+                          <div className="text-[10px] text-gray-400 font-medium">
+                            {new Date(isMainRecent ? startDate : compareStartDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'numeric', year: '2-digit' })} - {new Date(isMainRecent ? endDate : compareEndDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'numeric', year: '2-digit' })}
+                          </div>
+                        </div>
+                        {isComparing && stat.currentRaw !== undefined && renderChange(stat.currentRaw, stat.prevRaw, stat.inverse)}
+                      </div>
 
-              {/* Decorative Sparkline Placeholder */}
-              <div className="absolute bottom-0 right-0 w-24 h-12 opacity-5 pointer-events-none">
-                <svg viewBox="0 0 100 40" className="w-full h-full stroke-gray-900 fill-none stroke-2">
-                  <path d="M0,35 Q15,30 25,35 T50,20 T75,25 T100,5" />
-                </svg>
+                      {isComparing && (
+                        <div className="pt-3 border-t border-gray-100">
+                          <div className="text-xl font-bold text-gray-600 mb-0.5">{stat.prevValue}</div>
+                          <div className="text-[10px] text-gray-400 font-medium">
+                            {new Date(isMainRecent ? compareStartDate : startDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'numeric', year: '2-digit' })} - {new Date(isMainRecent ? compareEndDate : endDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'numeric', year: '2-digit' })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                ))}
               </div>
-            </motion.div>
-          ))}
-        </div>
 
         {/* Audit Table */}
         <div className="rounded-3xl bg-white border border-gray-200 shadow-sm overflow-hidden">
@@ -3244,6 +3445,332 @@ export default function App() {
           </div>
         </div>
       </div>
+          </motion.div>
+        ) : (
+          <motion.div 
+            key="tracker"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="space-y-6"
+          >
+            {/* SEO Action Tracker Content */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-2xl font-black text-gray-900 tracking-tight">Pelacak Aksi SEO</h2>
+                <p className="text-sm text-gray-500">Dokumentasikan dan lacak optimasi situs web Anda.</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={() => {
+                    setSelectedAspects([]);
+                    setIsAddingLog(true);
+                  }}
+                  className="bg-emerald-600 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20"
+                >
+                  <Plus className="w-4 h-4" />
+                  Input Baru
+                </button>
+                <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-xl p-1 shadow-sm">
+                  <button 
+                    onClick={exportLogsToCSV}
+                    className="p-2 hover:bg-gray-50 text-gray-600 rounded-lg transition-colors"
+                    title="Ekspor CSV"
+                  >
+                    <FileDown className="w-4 h-4" />
+                  </button>
+                  <button 
+                    onClick={exportLogsToPDF}
+                    className="p-2 hover:bg-gray-50 text-gray-600 rounded-lg transition-colors"
+                    title="Ekspor PDF"
+                  >
+                    <Download className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Filters */}
+            <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex flex-col md:flex-row gap-4">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input 
+                  type="text" 
+                  placeholder="Cari log berdasarkan URL, query, atau catatan..."
+                  value={logSearchQuery}
+                  onChange={(e) => setLogSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                />
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-xl border border-gray-100">
+                  <Calendar className="w-4 h-4 text-gray-400" />
+                  <input 
+                    type="month" 
+                    value={logFilterMonth}
+                    onChange={(e) => setLogFilterMonth(e.target.value)}
+                    className="bg-transparent text-sm font-bold text-gray-700 focus:outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Logs Table */}
+            <div className="bg-white rounded-3xl border border-gray-200 shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead className="bg-gray-50 border-b border-gray-100">
+                    <tr>
+                      <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-gray-400">Tanggal</th>
+                      <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-gray-400">URL Target</th>
+                      <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-gray-400">Aspek</th>
+                      <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-gray-400">Query</th>
+                      <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-gray-400">Detail</th>
+                      <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-gray-400 text-right">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filteredLogs.length > 0 ? (
+                      filteredLogs.map((log) => (
+                        <tr key={log.id} className="hover:bg-gray-50/50 transition-colors group">
+                          <td className="px-6 py-4">
+                            <div className="flex flex-col">
+                              <span className="text-sm font-bold text-gray-900">{new Date(log.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}</span>
+                              <span className="text-[10px] text-gray-400 font-medium">{new Date(log.date).getFullYear()}</span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-2 max-w-[200px]">
+                              <Globe className="w-3 h-3 text-emerald-600 shrink-0" />
+                              <span className="text-xs font-medium text-gray-700 truncate" title={log.url}>{log.url}</span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex flex-wrap gap-1">
+                              {log.aspect.map((a: string, idx: number) => (
+                                <span key={idx} className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] font-bold rounded-md border border-emerald-100">
+                                  {a}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className="text-xs text-gray-600 line-clamp-2">{log.queries}</span>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[9px] font-black text-gray-300 uppercase w-10">Sebelum</span>
+                                <span className="text-[11px] text-gray-500 line-clamp-2 whitespace-pre-line leading-relaxed">{log.before}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[9px] font-black text-emerald-400 uppercase w-10">Sesudah</span>
+                                <span className="text-[11px] text-gray-700 font-medium line-clamp-2 whitespace-pre-line leading-relaxed">{log.after}</span>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <button 
+                              onClick={() => handleDeleteLog(log.id)}
+                              className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={6} className="px-6 py-20 text-center">
+                          <div className="flex flex-col items-center gap-3">
+                            <div className="w-12 h-12 bg-gray-50 rounded-2xl flex items-center justify-center">
+                              <History className="w-6 h-6 text-gray-300" />
+                            </div>
+                            <p className="text-sm text-gray-400 font-medium">Tidak ada log ditemukan untuk periode ini.</p>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Add Log Modal */}
+      <AnimatePresence>
+        {isAddingLog && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsAddingLog(false)}
+              className="absolute inset-0 bg-gray-900/40 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl overflow-hidden"
+            >
+              <div className="px-8 py-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">
+                    <Plus className="w-5 h-5 text-emerald-600" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-gray-900 tracking-tight">Input Aksi SEO</h3>
+                    <p className="text-xs text-gray-500">Dokumentasikan detail optimasi Anda.</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setIsAddingLog(false)}
+                  className="p-2 hover:bg-gray-200 rounded-xl transition-colors text-gray-400"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleAddLog} className="p-8 space-y-6 max-h-[70vh] overflow-y-auto">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-1">URL Target</label>
+                    <input 
+                      name="url"
+                      required
+                      list="gsc-urls"
+                      placeholder="https://example.com/page"
+                      className="w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                    />
+                    <datalist id="gsc-urls">
+                      {Array.from(new Set(data.map(d => d.keys[1]).filter(Boolean))).map((url, idx) => (
+                        <option key={idx} value={url} />
+                      ))}
+                    </datalist>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-1">Tanggal Perubahan</label>
+                    <input 
+                      name="date"
+                      type="date"
+                      required
+                      defaultValue={new Date().toISOString().split('T')[0]}
+                      className="w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-1">Aspek yang Diubah</label>
+                  <div className="flex flex-wrap gap-3">
+                    {['Judul (Title)', 'Deskripsi (Meta)', 'H1-H6', 'Content Body', 'Internal Link', 'Penambahan Query', 'Technical', 'Lainnya'].map(aspect => (
+                      <label key={aspect} className="flex items-center gap-2 cursor-pointer group">
+                        <input 
+                          type="checkbox" 
+                          name="aspect" 
+                          value={aspect} 
+                          className="hidden peer"
+                          checked={selectedAspects.includes(aspect)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedAspects([...selectedAspects, aspect]);
+                            } else {
+                              setSelectedAspects(selectedAspects.filter(a => a !== aspect));
+                            }
+                          }}
+                        />
+                        <div className="px-3 py-1.5 rounded-lg border border-gray-100 bg-gray-50 text-xs font-bold text-gray-500 peer-checked:bg-emerald-600 peer-checked:text-white peer-checked:border-emerald-600 transition-all group-hover:border-emerald-200">
+                          {aspect}
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {selectedAspects.includes('Penambahan Query') && (
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-1">Target Query</label>
+                    <textarea 
+                      name="queries"
+                      placeholder="Daftar query yang ditargetkan oleh perubahan ini..."
+                      rows={2}
+                      className="w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50 resize-none"
+                    />
+                  </div>
+                )}
+
+                {selectedAspects.length > 0 ? (
+                  <div className="space-y-6 border-t border-gray-100 pt-6">
+                    {selectedAspects.map(aspect => (
+                      <div key={aspect} className="space-y-4 p-4 bg-gray-50 rounded-2xl border border-gray-100">
+                        <div className="flex items-center gap-2">
+                          <div className="w-1.5 h-4 bg-emerald-500 rounded-full" />
+                          <h4 className="text-xs font-black text-gray-900 uppercase tracking-tight">{aspect}</h4>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-1">Sebelum</label>
+                            <textarea 
+                              name={`before_${aspect}`}
+                              required
+                              placeholder={`Kondisi ${aspect} sebelumnya...`}
+                              rows={3}
+                              className="w-full px-4 py-3 bg-white border border-gray-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50 resize-none"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-1">Sesudah</label>
+                            <textarea 
+                              name={`after_${aspect}`}
+                              required
+                              placeholder={`Kondisi ${aspect} sesudah...`}
+                              rows={3}
+                              className="w-full px-4 py-3 bg-white border border-gray-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50 resize-none"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-8 text-center bg-gray-50 rounded-2xl border border-dashed border-gray-200">
+                    <p className="text-sm text-gray-400 font-medium">Pilih aspek yang diubah untuk mengisi detail kondisi.</p>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-1">Catatan Kontekstual (Opsional)</label>
+                  <textarea 
+                    name="note"
+                    placeholder="Mengapa perubahan ini dilakukan? Ada konteks khusus?"
+                    rows={2}
+                    className="w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50 resize-none"
+                  />
+                </div>
+
+                <div className="pt-4 flex items-center gap-3">
+                  <button 
+                    type="submit"
+                    className="flex-1 bg-gray-900 text-white py-4 rounded-2xl font-bold hover:bg-gray-800 transition-all shadow-lg shadow-gray-200"
+                  >
+                    Simpan Log SEO
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => setIsAddingLog(false)}
+                    className="px-8 py-4 bg-gray-100 text-gray-500 rounded-2xl font-bold hover:bg-gray-200 transition-all"
+                  >
+                    Batal
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </main>
 
       <footer className="max-w-[1600px] mx-auto p-8 border-t border-gray-200 mt-12 text-center text-gray-400 text-sm font-medium">

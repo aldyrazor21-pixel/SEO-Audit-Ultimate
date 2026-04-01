@@ -1,0 +1,27 @@
+{
+  "entities": {
+    "Log": {
+      "title": "SEO Log",
+      "description": "A record of an SEO action taken on a specific URL.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "The user ID of the owner." },
+        "url": { "type": "string", "description": "The target URL." },
+        "date": { "type": "string", "description": "The date of the change (YYYY-MM-DD)." },
+        "aspect": { "type": "array", "items": { "type": "string" }, "description": "The aspects changed (e.g., Title, Description)." },
+        "queries": { "type": "string", "description": "Targeted search queries." },
+        "before": { "type": "string", "description": "The state before the change." },
+        "after": { "type": "string", "description": "The state after the change." },
+        "note": { "type": "string", "description": "Optional contextual notes." },
+        "createdAt": { "type": "string", "description": "ISO timestamp of creation." }
+      },
+      "required": ["uid", "url", "date", "aspect", "before", "after", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/logs/{logId}": {
+      "schema": "Log",
+      "description": "Collection of SEO action logs."
+    }
+  }
+}
