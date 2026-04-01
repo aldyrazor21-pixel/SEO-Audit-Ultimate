@@ -102,6 +102,9 @@ export default function App() {
   const [expandedScrollPage, setExpandedScrollPage] = useState<string | null>(null);
   const [expandedErPage, setExpandedErPage] = useState<string | null>(null);
   const [expandedCtaPage, setExpandedCtaPage] = useState<string | null>(null);
+  const [selectedCtaPages, setSelectedCtaPages] = useState<Set<string>>(new Set());
+  const [selectedScrollPages, setSelectedScrollPages] = useState<Set<string>>(new Set());
+  const [selectedErPages, setSelectedErPages] = useState<Set<string>>(new Set());
   const [expandedConsolidationQuery, setExpandedConsolidationQuery] = useState<string | null>(null);
   const [enrichmentSort, setEnrichmentSort] = useState<{ col: 'clicks' | 'impressions' | 'position', order: 'asc' | 'desc' }>({ col: 'position', order: 'asc' });
   const [lhfSort, setLhfSort] = useState<{ col: 'clicks' | 'impressions' | 'position', order: 'asc' | 'desc' }>({ col: 'position', order: 'asc' });
@@ -337,17 +340,6 @@ export default function App() {
           { content: q.position.toFixed(1), styles: { fontSize: 9, textColor: [100, 116, 139] } }
         ]);
       });
-
-      if (selectedGa4Property) {
-        const ga4 = getGa4StatsForPage(row.keys[0]);
-        const total = Object.values(ga4).reduce((a, b) => a + b, 0);
-        const sales = (ga4['purchase'] || 0) + (ga4['purchase_marketplace'] || 0) + (ga4['purchase_tiktok'] || 0) + (ga4['purchase_whatsapp'] || 0);
-        const ctas = (ga4['click_cta_article'] || 0) + (ga4['click_cta_ke_produk'] || 0);
-        
-        tableData.push([
-          { content: `  GA4: ${total} Events | ${sales} Sales | ${ctas} CTAs`, colSpan: 5, styles: { fontSize: 8, textColor: [5, 150, 105], fontStyle: 'italic' } }
-        ]);
-      }
     });
 
     autoTable(doc, {
@@ -408,17 +400,6 @@ export default function App() {
           { content: q.position.toFixed(1), styles: { fontSize: 9, textColor: [107, 114, 128] } }
         ]);
       });
-
-      if (selectedGa4Property) {
-        const ga4 = getGa4StatsForPage(row.keys[0]);
-        const total = Object.values(ga4).reduce((a, b) => a + b, 0);
-        const sales = (ga4['purchase'] || 0) + (ga4['purchase_marketplace'] || 0) + (ga4['purchase_tiktok'] || 0) + (ga4['purchase_whatsapp'] || 0);
-        const ctas = (ga4['click_cta_article'] || 0) + (ga4['click_cta_ke_produk'] || 0);
-        
-        tableData.push([
-          { content: `  GA4: ${total} Events | ${sales} Sales | ${ctas} CTAs`, colSpan: 5, styles: { fontSize: 8, textColor: [5, 150, 105], fontStyle: 'italic' } }
-        ]);
-      }
     });
 
     autoTable(doc, {
@@ -480,17 +461,6 @@ export default function App() {
           { content: q.position.toFixed(1), styles: { fontSize: 9, textColor: [107, 114, 128] } }
         ]);
       });
-
-      if (selectedGa4Property) {
-        const ga4 = getGa4StatsForPage(row.keys[0]);
-        const total = Object.values(ga4).reduce((a, b) => a + b, 0);
-        const sales = (ga4['purchase'] || 0) + (ga4['purchase_marketplace'] || 0) + (ga4['purchase_tiktok'] || 0) + (ga4['purchase_whatsapp'] || 0);
-        const ctas = (ga4['click_cta_article'] || 0) + (ga4['click_cta_ke_produk'] || 0);
-        
-        tableData.push([
-          { content: `  GA4: ${total} Events | ${sales} Sales | ${ctas} CTAs`, colSpan: 5, styles: { fontSize: 8, textColor: [5, 150, 105], fontStyle: 'italic' } }
-        ]);
-      }
     });
 
     autoTable(doc, {
@@ -551,17 +521,6 @@ export default function App() {
           { content: q.position.toFixed(1), styles: { fontSize: 9, textColor: [107, 114, 128] } }
         ]);
       });
-
-      if (selectedGa4Property) {
-        const ga4 = getGa4StatsForPage(row.keys[0]);
-        const total = Object.values(ga4).reduce((a, b) => a + b, 0);
-        const sales = (ga4['purchase'] || 0) + (ga4['purchase_marketplace'] || 0) + (ga4['purchase_tiktok'] || 0) + (ga4['purchase_whatsapp'] || 0);
-        const ctas = (ga4['click_cta_article'] || 0) + (ga4['click_cta_ke_produk'] || 0);
-        
-        tableData.push([
-          { content: `  GA4: ${total} Events | ${sales} Sales | ${ctas} CTAs`, colSpan: 5, styles: { fontSize: 8, textColor: [5, 150, 105], fontStyle: 'italic' } }
-        ]);
-      }
     });
 
     autoTable(doc, {
@@ -642,16 +601,7 @@ export default function App() {
           { content: p.position.toFixed(1), styles: { fontSize: 9, textColor: [107, 114, 128] } }
         ]);
 
-        if (selectedGa4Property) {
-          const ga4 = getGa4StatsForPage(p.url);
-          const total = Object.values(ga4).reduce((a, b) => a + b, 0);
-          const sales = (ga4['purchase'] || 0) + (ga4['purchase_marketplace'] || 0) + (ga4['purchase_tiktok'] || 0) + (ga4['purchase_whatsapp'] || 0);
-          const ctas = (ga4['click_cta_article'] || 0) + (ga4['click_cta_ke_produk'] || 0);
-          
-          tableData.push([
-            { content: `    GA4: ${total} Events | ${sales} Sales | ${ctas} CTAs`, colSpan: 5, styles: { fontSize: 8, textColor: [5, 150, 105], fontStyle: 'italic' } }
-          ]);
-        }
+        /* GA4 stats removed as requested */
       });
     });
 
@@ -677,6 +627,11 @@ export default function App() {
   const downloadScrollPDF = (scrollData: any[]) => {
     const doc = new jsPDF() as any;
     
+    // Filter data if some are selected
+    const dataToExport = selectedScrollPages.size > 0 
+      ? scrollData.filter(row => selectedScrollPages.has(row.keys[0]))
+      : scrollData;
+
     // Header
     doc.setFontSize(18);
     doc.setTextColor(5, 150, 105); // emerald-600
@@ -684,10 +639,10 @@ export default function App() {
     
     doc.setFontSize(11);
     doc.setTextColor(107, 114, 128); // gray-500
-    doc.text('Page scroll depth analysis (GA4 Events)', 14, 30);
+    doc.text(`Page scroll depth analysis (GA4 Events)${selectedScrollPages.size > 0 ? ` (${selectedScrollPages.size} selected)` : ''}`, 14, 30);
     doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 36);
     
-    const tableData = scrollData.map(row => {
+    const tableData = dataToExport.map(row => {
       const ga4 = getGa4StatsForPage(row.keys[0]);
       const sessions = ga4['sessions'] || 0;
       const getPerc = (val: number) => sessions > 0 ? `${((val / sessions) * 100).toFixed(1)}%` : '0%';
@@ -722,6 +677,11 @@ export default function App() {
   const downloadErPDF = (erData: any[]) => {
     const doc = new jsPDF() as any;
     
+    // Filter data if some are selected
+    const dataToExport = selectedErPages.size > 0 
+      ? erData.filter(row => selectedErPages.has(row.keys[0]))
+      : erData;
+
     // Header
     doc.setFontSize(18);
     doc.setTextColor(5, 150, 105); // emerald-600
@@ -729,10 +689,10 @@ export default function App() {
     
     doc.setFontSize(11);
     doc.setTextColor(107, 114, 128); // gray-500
-    doc.text(`Engagement Rate Analysis - Sub-tab: ${erSubTab}`, 14, 30);
+    doc.text(`Engagement Rate Analysis - Sub-tab: ${erSubTab}${selectedErPages.size > 0 ? ` (${selectedErPages.size} selected)` : ''}`, 14, 30);
     doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 36);
     
-    const tableData = erData.map(row => {
+    const tableData = dataToExport.map(row => {
       const ga4 = getGa4StatsForPage(row.keys[0]);
       const sessions = ga4['sessions'] || 0;
       const er = ga4['engagement_rate'] || 0;
@@ -758,6 +718,11 @@ export default function App() {
   const downloadCtaPDF = (ctaData: any[]) => {
     const doc = new jsPDF() as any;
     
+    // Filter data if some are selected
+    const dataToExport = selectedCtaPages.size > 0 
+      ? ctaData.filter(row => selectedCtaPages.has(row.keys[0]))
+      : ctaData;
+
     // Header
     doc.setFontSize(18);
     doc.setTextColor(5, 150, 105); // emerald-600
@@ -765,10 +730,10 @@ export default function App() {
     
     doc.setFontSize(11);
     doc.setTextColor(107, 114, 128); // gray-500
-    doc.text(`CTA Analysis - Sub-tab: ${ctaSubTab}`, 14, 30);
+    doc.text(`CTA Analysis - Sub-tab: ${ctaSubTab}${selectedCtaPages.size > 0 ? ` (${selectedCtaPages.size} selected)` : ''}`, 14, 30);
     doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 36);
     
-    const tableData = ctaData.map(row => {
+    const tableData = dataToExport.map(row => {
       const ga4 = getGa4StatsForPage(row.keys[0]);
       const sessions = ga4['sessions'] || 0;
       const ctaArticle = ga4['click_cta_article'] || 0;
@@ -807,7 +772,12 @@ export default function App() {
     setExpandedAiPage(null);
     setExpandedConsolidationQuery(null);
     setExpandedCtaPage(null);
+    setSelectedCtaPages(new Set());
   }, [auditTab]);
+
+  useEffect(() => {
+    setSelectedCtaPages(new Set());
+  }, [ctaSubTab]);
 
   useEffect(() => {
     setSelectedCtrPage(null);
@@ -842,6 +812,20 @@ export default function App() {
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    setSelectedCtaPages(new Set());
+  }, [ctaSubTab]);
+
+  useEffect(() => {
+    setSelectedErPages(new Set());
+  }, [erSubTab]);
+
+  useEffect(() => {
+    setSelectedCtaPages(new Set());
+    setSelectedScrollPages(new Set());
+    setSelectedErPages(new Set());
+  }, [auditTab]);
 
   const fetchSites = async () => {
     try {
@@ -1148,20 +1132,29 @@ export default function App() {
   }
 
   // Dashboard View
-  const totalClicks = summary?.clicks || 0;
-  const totalImpressions = summary?.impressions || 0;
-  const avgCtr = (summary?.ctr || 0) * 100;
-  const avgPos = summary?.position || 0;
+  const isMainRecent = !isComparing || new Date(startDate) >= new Date(compareStartDate);
+  
+  const activeSummary = isMainRecent ? summary : comparisonSummary;
+  const activeComparisonSummary = isMainRecent ? comparisonSummary : summary;
+  const activeData = isMainRecent ? data : comparisonData;
+  const activeComparisonData = isMainRecent ? comparisonData : data;
+  const activeTimeSeries = isMainRecent ? timeSeries : comparisonTimeSeries;
+  const activeComparisonTimeSeries = isMainRecent ? comparisonTimeSeries : timeSeries;
+
+  const totalClicks = activeSummary?.clicks || 0;
+  const totalImpressions = activeSummary?.impressions || 0;
+  const avgCtr = (activeSummary?.ctr || 0) * 100;
+  const avgPos = activeSummary?.position || 0;
 
   const totalGa4Events = ga4Data.reduce((acc, row) => acc + parseInt(row.metricValues[0].value), 0);
   const totalSales = ga4Data
     .filter(row => row.dimensionValues[1].value.includes('purchase'))
     .reduce((acc, row) => acc + parseInt(row.metricValues[0].value), 0);
 
-  const compClicks = comparisonSummary?.clicks || 0;
-  const compImpressions = comparisonSummary?.impressions || 0;
-  const compCtr = (comparisonSummary?.ctr || 0) * 100;
-  const compPos = comparisonSummary?.position || 0;
+  const compClicks = activeComparisonSummary?.clicks || 0;
+  const compImpressions = activeComparisonSummary?.impressions || 0;
+  const compCtr = (activeComparisonSummary?.ctr || 0) * 100;
+  const compPos = activeComparisonSummary?.position || 0;
 
   const getChange = (current: number, previous: number) => {
     if (previous === 0) return 0;
@@ -1184,7 +1177,7 @@ export default function App() {
   };
 
   // Top Pages (simplified from query/page dimensions)
-  const topQueries = [...data]
+  const topQueries = [...activeData]
     .sort((a, b) => b.clicks - a.clicks)
     .slice(0, 10);
 
@@ -1209,8 +1202,8 @@ export default function App() {
       .map(([_, val]) => val);
   };
 
-  const currentMonthly = getMonthlyData(timeSeries);
-  const prevMonthly = getMonthlyData(comparisonTimeSeries);
+  const currentMonthly = getMonthlyData(activeTimeSeries);
+  const prevMonthly = getMonthlyData(activeComparisonTimeSeries);
 
   const monthlyChartData = currentMonthly.map((curr, i) => ({
     ...curr,
@@ -1218,16 +1211,16 @@ export default function App() {
     prevImpressions: prevMonthly[i]?.impressions,
   }));
 
-  const chartData = timeSeries.length > 31 ? monthlyChartData : timeSeries.map((row, i) => ({
+  const chartData = activeTimeSeries.length > 31 ? monthlyChartData : activeTimeSeries.map((row, i) => ({
     ...row,
     date: row.keys[0],
-    prevClicks: comparisonTimeSeries[i]?.clicks,
-    prevImpressions: comparisonTimeSeries[i]?.impressions,
+    prevClicks: activeComparisonTimeSeries[i]?.clicks,
+    prevImpressions: activeComparisonTimeSeries[i]?.impressions,
   }));
 
   // Audit Logic
   const getAuditData = () => {
-    let filtered = [...data];
+    let filtered = [...activeData];
 
     if (searchQuery) {
       filtered = filtered.filter(row => 
@@ -1239,7 +1232,7 @@ export default function App() {
     switch (auditTab) {
       case 'lhf':
         const pageGroups = new Map<string, { clicks: number[], impressions: number[], ctr: number[], position: number[], hasLowPosQuery: boolean, queries: Set<string> }>();
-        data.forEach(row => {
+        activeData.forEach(row => {
           const page = row.keys[1];
           if (!page || page.includes('#')) return;
           if (excludeProduk && page.includes('/produk/')) return;
@@ -1284,7 +1277,7 @@ export default function App() {
         // First, identify LHF pages to exclude them
         const lhfPagesForZero = new Set<string>();
         const tempLhfGroupsForZero = new Map<string, { position: number[], hasLowPosQuery: boolean }>();
-        data.forEach(row => {
+        activeData.forEach(row => {
           const page = row.keys[1];
           if (!page || page.includes('#')) return;
           if (!tempLhfGroupsForZero.has(page)) {
@@ -1303,7 +1296,7 @@ export default function App() {
         });
 
         const zeroPageGroups = new Map<string, { clicks: number[], impressions: number[], ctr: number[], position: number[], queries: Set<string> }>();
-        data.forEach(row => {
+        activeData.forEach(row => {
           const page = row.keys[1];
           const query = row.keys[0];
           if (!page || page.includes('#')) return;
@@ -1340,7 +1333,7 @@ export default function App() {
         // First, identify LHF pages to exclude them
         const lhfPages = new Set<string>();
         const tempLhfGroups = new Map<string, { position: number[], hasLowPosQuery: boolean }>();
-        data.forEach(row => {
+        activeData.forEach(row => {
           const page = row.keys[1];
           if (!page || page.includes('#')) return;
           if (!tempLhfGroups.has(page)) {
@@ -1359,7 +1352,7 @@ export default function App() {
         });
 
         const enrichmentPageGroups = new Map<string, { clicks: number[], impressions: number[], ctr: number[], position: number[], hasLowPosQuery: boolean }>();
-        data.forEach(row => {
+        activeData.forEach(row => {
           const page = row.keys[1];
           if (!page || page.includes('#')) return;
           if (excludeProduk && page.includes('/produk/')) return;
@@ -1406,7 +1399,7 @@ export default function App() {
         const aiQuestionWords = ['apa', 'siapa', 'kapan', 'dimana', 'mengapa', 'bagaimana', 'apakah', 'bisakah', 'berapa', '?'];
         const aiPageGroups = new Map<string, { clicks: number[], impressions: number[], ctr: number[], position: number[], hasQuestion: boolean }>();
         
-        data.forEach(row => {
+        activeData.forEach(row => {
           const page = row.keys[1];
           const query = row.keys[0];
           if (!page || page.includes('#')) return;
@@ -1443,10 +1436,10 @@ export default function App() {
 
         return aggregatedAi.sort((a, b) => b.impressions - a.impressions);
       case 'declining':
-        if (!isComparing || comparisonData.length === 0) return [];
+        if (!isComparing || activeComparisonData.length === 0) return [];
         
         const currentPages = new Map<string, { clicks: number[], impressions: number[], ctr: number[], position: number[], queries: Map<string, { clicks: number, impressions: number, ctr: number, position: number }> }>();
-        data.forEach(row => {
+        activeData.forEach(row => {
           const page = row.keys[1];
           const query = row.keys[0];
           if (!page || page.includes('#')) return;
@@ -1466,7 +1459,7 @@ export default function App() {
         });
 
         const prevPages = new Map<string, { clicks: number[], impressions: number[], ctr: number[], position: number[], queries: Map<string, { clicks: number, impressions: number, ctr: number, position: number }> }>();
-        comparisonData.forEach(row => {
+        activeComparisonData.forEach(row => {
           const page = row.keys[1];
           const query = row.keys[0];
           if (!page || page.includes('#')) return;
@@ -1534,7 +1527,7 @@ export default function App() {
         // Find queries that have multiple pages
         const queryGroups = new Map<string, { clicks: number, impressions: number, ctr: number[], position: number[], pages: string[] }>();
         
-        data.forEach(row => {
+        activeData.forEach(row => {
           const q = row.keys[0];
           const p = row.keys[1];
           if (!q || !p) return;
@@ -1569,7 +1562,7 @@ export default function App() {
         return cannibalized.sort((a, b) => b.impressions - a.impressions);
       case 'scroll':
         const scrollPageGroups = new Map<string, { clicks: number[], impressions: number[], ctr: number[], position: number[], queries: Set<string> }>();
-        data.forEach(row => {
+        activeData.forEach(row => {
           const page = row.keys[1];
           if (!page || page.includes('#')) return;
           if (excludeProduk && page.includes('/produk/')) return;
@@ -1631,7 +1624,7 @@ export default function App() {
         });
       case 'er':
         const erPageGroups = new Map<string, { clicks: number[], impressions: number[], ctr: number[], position: number[], queries: Set<string> }>();
-        data.forEach(row => {
+        activeData.forEach(row => {
           const page = row.keys[1];
           if (!page || page.includes('#')) return;
           
@@ -1692,7 +1685,7 @@ export default function App() {
         });
       case 'cta':
         const ctaPageGroups = new Map<string, { clicks: number[], impressions: number[], ctr: number[], position: number[], queries: Set<string> }>();
-        data.forEach(row => {
+        activeData.forEach(row => {
           const page = row.keys[1];
           if (!page || page.includes('#')) return;
           
@@ -1764,7 +1757,7 @@ export default function App() {
       stats[i] = { clicks: 0, impressions: 0, queries: 0 };
     }
 
-    data.forEach(row => {
+    activeData.forEach(row => {
       const page = row.keys[1] || '';
       if (excludeProduk && page.includes('/produk/')) return;
       
@@ -1815,7 +1808,7 @@ export default function App() {
             <div className="hidden lg:flex items-center gap-3">
               <div className="flex items-center gap-2 bg-gray-100 border border-gray-200 rounded-lg p-1">
                 <div className="flex items-center gap-2 px-2">
-                  <span className="text-[10px] text-gray-500 uppercase font-bold">From</span>
+                  <span className="text-[10px] text-gray-500 uppercase font-bold">Primary Range</span>
                   <input 
                     type="date" 
                     value={startDate}
@@ -1849,26 +1842,42 @@ export default function App() {
                 </button>
                 
                 {isComparing && (
-                  <div className="flex items-center gap-2 bg-gray-100 border border-gray-200 rounded-lg p-1 animate-in fade-in slide-in-from-left-2">
-                    <div className="flex items-center gap-2 px-2">
-                      <span className="text-[10px] text-gray-500 uppercase font-bold">Vs</span>
-                      <input 
-                        type="date" 
-                        value={compareStartDate}
-                        onChange={(e) => setCompareStartDate(e.target.value)}
-                        className="bg-transparent text-xs text-gray-700 focus:outline-none"
-                      />
+                  <>
+                    <button
+                      onClick={() => {
+                        const s = startDate;
+                        const e = endDate;
+                        setStartDate(compareStartDate);
+                        setEndDate(compareEndDate);
+                        setCompareStartDate(s);
+                        setCompareEndDate(e);
+                      }}
+                      className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 transition-colors"
+                      title="Swap periods"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                    </button>
+                    <div className="flex items-center gap-2 bg-gray-100 border border-gray-200 rounded-lg p-1 animate-in fade-in slide-in-from-left-2">
+                      <div className="flex items-center gap-2 px-2">
+                        <span className="text-[10px] text-gray-500 uppercase font-bold">Compare VS</span>
+                        <input 
+                          type="date" 
+                          value={compareStartDate}
+                          onChange={(e) => setCompareStartDate(e.target.value)}
+                          className="bg-transparent text-xs text-gray-700 focus:outline-none"
+                        />
+                      </div>
+                      <div className="w-px h-4 bg-gray-200" />
+                      <div className="flex items-center gap-2 px-2">
+                        <input 
+                          type="date" 
+                          value={compareEndDate}
+                          onChange={(e) => setCompareEndDate(e.target.value)}
+                          className="bg-transparent text-xs text-gray-700 focus:outline-none"
+                        />
+                      </div>
                     </div>
-                    <div className="w-px h-4 bg-gray-200" />
-                    <div className="flex items-center gap-2 px-2">
-                      <input 
-                        type="date" 
-                        value={compareEndDate}
-                        onChange={(e) => setCompareEndDate(e.target.value)}
-                        className="bg-transparent text-xs text-gray-700 focus:outline-none"
-                      />
-                    </div>
-                  </div>
+                  </>
                 )}
               </div>
             </div>
@@ -2357,7 +2366,7 @@ export default function App() {
                         className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition-all shadow-sm hover:shadow-md active:scale-95"
                       >
                         <FileDown className="w-4 h-4" />
-                        Download PDF
+                        {selectedScrollPages.size > 0 ? `Export Selected (${selectedScrollPages.size})` : 'Download PDF'}
                       </button>
                     )}
                     {auditTab === 'er' && (
@@ -2366,7 +2375,7 @@ export default function App() {
                         className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition-all shadow-sm hover:shadow-md active:scale-95"
                       >
                         <FileDown className="w-4 h-4" />
-                        Download PDF
+                        {selectedErPages.size > 0 ? `Export Selected (${selectedErPages.size})` : 'Download PDF'}
                       </button>
                     )}
                     {auditTab === 'cta' && (
@@ -2375,7 +2384,7 @@ export default function App() {
                         className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition-all shadow-sm hover:shadow-md active:scale-95"
                       >
                         <FileDown className="w-4 h-4" />
-                        Download PDF
+                        {selectedCtaPages.size > 0 ? `Export Selected (${selectedCtaPages.size})` : 'Download PDF'}
                       </button>
                     )}
                   </div>
@@ -2441,6 +2450,32 @@ export default function App() {
                 <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-gray-100 bg-gray-50/50">
+                    {(auditTab === 'cta' || auditTab === 'scroll' || auditTab === 'er') && (
+                      <th className="px-8 py-4 text-xs font-bold uppercase tracking-wider text-gray-400 w-10">
+                        <input 
+                          type="checkbox" 
+                          className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                          checked={
+                            auditRows.length > 0 && 
+                            (auditTab === 'cta' ? selectedCtaPages.size === auditRows.length :
+                             auditTab === 'scroll' ? selectedScrollPages.size === auditRows.length :
+                             selectedErPages.size === auditRows.length)
+                          }
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              const allIds = auditRows.map(r => r.keys[0]);
+                              if (auditTab === 'cta') setSelectedCtaPages(new Set(allIds));
+                              else if (auditTab === 'scroll') setSelectedScrollPages(new Set(allIds));
+                              else setSelectedErPages(new Set(allIds));
+                            } else {
+                              if (auditTab === 'cta') setSelectedCtaPages(new Set());
+                              else if (auditTab === 'scroll') setSelectedScrollPages(new Set());
+                              else setSelectedErPages(new Set());
+                            }
+                          }}
+                        />
+                      </th>
+                    )}
                     <th className="px-8 py-4 text-xs font-bold uppercase tracking-wider text-gray-400">
                       {auditTab === 'consolidation' ? 'Query' : (auditTab === 'lhf' || auditTab === 'declining' || auditTab === 'zero' || auditTab === 'enrichment' || auditTab === 'ai' || auditTab === 'scroll' || auditTab === 'er' || auditTab === 'cta') ? 'Page URL' : 'Query / Page'}
                     </th>
@@ -2535,7 +2570,7 @@ export default function App() {
                         </div>
                       </th>
                     )}
-                    {auditTab !== 'er' && (
+                    {auditTab !== 'er' && auditTab !== 'cta' && (
                       <th className="px-8 py-4 text-xs font-bold uppercase tracking-wider text-gray-400">
                         <div className="flex items-center gap-2">
                           {auditTab === 'scroll' ? 'Scroll 50%' : (auditTab === 'lhf' || auditTab === 'declining' || auditTab === 'zero' || auditTab === 'enrichment' || auditTab === 'ai' || auditTab === 'consolidation') ? 'Avg. Impressions' : 'Impressions'}
@@ -2566,12 +2601,8 @@ export default function App() {
                         </div>
                       </th>
                     )}
-                    {selectedGa4Property && auditTab !== 'scroll' && auditTab !== 'er' && (
-                      <th className="px-8 py-4 text-xs font-bold uppercase tracking-wider text-gray-400">
-                        GA4 Conversions
-                      </th>
-                    )}
-                    {auditTab !== 'lhf' && auditTab !== 'er' && (
+
+                    {auditTab !== 'lhf' && auditTab !== 'er' && auditTab !== 'cta' && (
                       <th className="px-8 py-4 text-xs font-bold uppercase tracking-wider text-gray-400">
                         <div className="flex items-center gap-2">
                           {auditTab === 'scroll' ? 'Scroll 75%' : (auditTab === 'lhf' || auditTab === 'declining' || auditTab === 'zero' || auditTab === 'enrichment' || auditTab === 'ai' || auditTab === 'consolidation') ? 'Avg. CTR' : 'CTR'}
@@ -2586,7 +2617,7 @@ export default function App() {
                         </div>
                       </th>
                     )}
-                    {auditTab !== 'scroll' && auditTab !== 'er' && (
+                    {auditTab !== 'scroll' && auditTab !== 'er' && auditTab !== 'cta' && (
                       <th className="px-8 py-4 text-xs font-bold uppercase tracking-wider text-gray-400">
                         <div className="flex items-center gap-2">
                           {(auditTab === 'lhf' || auditTab === 'declining' || auditTab === 'zero' || auditTab === 'enrichment' || auditTab === 'ai' || auditTab === 'consolidation') ? 'Avg. Position' : 'Position'}
@@ -2645,6 +2676,38 @@ export default function App() {
                           }
                         }}
                       >
+                        {(auditTab === 'cta' || auditTab === 'scroll' || auditTab === 'er') && (
+                          <td className="px-8 py-4 w-10">
+                            <input 
+                              type="checkbox" 
+                              className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                              checked={
+                                auditTab === 'cta' ? selectedCtaPages.has(row.keys[0]) :
+                                auditTab === 'scroll' ? selectedScrollPages.has(row.keys[0]) :
+                                selectedErPages.has(row.keys[0])
+                              }
+                              onChange={(e) => {
+                                if (auditTab === 'cta') {
+                                  const newSelected = new Set(selectedCtaPages);
+                                  if (e.target.checked) newSelected.add(row.keys[0]);
+                                  else newSelected.delete(row.keys[0]);
+                                  setSelectedCtaPages(newSelected);
+                                } else if (auditTab === 'scroll') {
+                                  const newSelected = new Set(selectedScrollPages);
+                                  if (e.target.checked) newSelected.add(row.keys[0]);
+                                  else newSelected.delete(row.keys[0]);
+                                  setSelectedScrollPages(newSelected);
+                                } else {
+                                  const newSelected = new Set(selectedErPages);
+                                  if (e.target.checked) newSelected.add(row.keys[0]);
+                                  else newSelected.delete(row.keys[0]);
+                                  setSelectedErPages(newSelected);
+                                }
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          </td>
+                        )}
                         <td className="px-8 py-4 max-w-md">
                           <div className="flex flex-col gap-1">
                             {auditTab === 'consolidation' ? (
@@ -2739,7 +2802,7 @@ export default function App() {
                         </div>
                       </td>
                     )}
-                    {auditTab !== 'er' && (
+                    {auditTab !== 'er' && auditTab !== 'cta' && (
                         <td className="px-8 py-4 text-sm font-medium text-gray-500">
                         {auditTab === 'scroll' ? (
                           (() => {
@@ -2759,46 +2822,8 @@ export default function App() {
                         )}
                       </td>
                     )}
-                    {selectedGa4Property && auditTab !== 'scroll' && auditTab !== 'er' && (
-                        <td className="px-8 py-4">
-                          {(() => {
-                            const pageUrl = (auditTab === 'lhf' || auditTab === 'declining' || auditTab === 'zero' || auditTab === 'enrichment' || auditTab === 'ai') ? row.keys[0] : row.keys[1];
-                            const ga4Stats = getGa4StatsForPage(pageUrl);
-                            const totalEvents = Object.values(ga4Stats).reduce((a, b) => a + b, 0);
-                            const purchases = ga4Stats.purchase + ga4Stats.purchase_marketplace + ga4Stats.purchase_tiktok + ga4Stats.purchase_whatsapp;
-                            const ctas = ga4Stats.click_cta_article + ga4Stats.click_cta_ke_produk;
-                            
-                            return (
-                              <div className="flex flex-col gap-1">
-                                <div className="flex items-center gap-2">
-                                  <span className={cn(
-                                    "text-xs font-bold",
-                                    totalEvents > 0 ? "text-emerald-600" : "text-gray-400"
-                                  )}>
-                                    {totalEvents.toLocaleString()}
-                                  </span>
-                                  <span className="text-[8px] text-gray-400 uppercase">Total</span>
-                                </div>
-                                {(purchases > 0 || ctas > 0) && (
-                                  <div className="flex flex-wrap gap-1">
-                                    {purchases > 0 && (
-                                      <span className="text-[8px] bg-emerald-50 text-emerald-700 px-1 py-0.5 rounded font-bold">
-                                        {purchases} Sales
-                                      </span>
-                                    )}
-                                    {ctas > 0 && (
-                                      <span className="text-[8px] bg-blue-50 text-blue-700 px-1 py-0.5 rounded font-bold">
-                                        {ctas} CTAs
-                                      </span>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })()}
-                        </td>
-                      )}
-                      {auditTab !== 'er' && (auditTab !== 'lhf' || auditTab === 'scroll') && (
+
+                      {auditTab !== 'er' && auditTab !== 'cta' && (auditTab !== 'lhf' || auditTab === 'scroll') && (
                         <td className="px-8 py-4">
                           {auditTab === 'scroll' ? (
                             (() => {
@@ -2823,7 +2848,7 @@ export default function App() {
                           )}
                         </td>
                       )}
-                        {auditTab !== 'scroll' && auditTab !== 'er' && (
+                        {auditTab !== 'scroll' && auditTab !== 'er' && auditTab !== 'cta' && (
                           <td className="px-8 py-4">
                             <div className="flex flex-col">
                               <span className={cn(
