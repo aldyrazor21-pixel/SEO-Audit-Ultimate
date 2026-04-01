@@ -1164,13 +1164,16 @@ export default function App() {
   const renderChange = (current: number, previous: number, inverse = false) => {
     if (!isComparing) return null;
     const change = getChange(current, previous);
+    if (change === 0) return <div className="text-[10px] font-bold text-gray-400">—</div>;
+    
     const isPositive = change > 0;
-    const color = inverse 
-      ? (isPositive ? 'text-red-400' : 'text-emerald-400')
-      : (isPositive ? 'text-emerald-400' : 'text-red-400');
+    const isGood = inverse ? !isPositive : isPositive;
     
     return (
-      <div className={cn("text-xs font-medium flex items-center gap-1 mt-1", color)}>
+      <div className={cn(
+        "text-[10px] font-bold flex items-center gap-0.5 px-2 py-0.5 rounded-full",
+        isGood ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"
+      )}>
         {isPositive ? '↑' : '↓'} {Math.abs(change).toFixed(1)}%
       </div>
     );
@@ -1808,23 +1811,32 @@ export default function App() {
             <div className="hidden lg:flex items-center gap-3">
               <div className="flex items-center gap-2 bg-gray-100 border border-gray-200 rounded-lg p-1">
                 <div className="flex items-center gap-2 px-2">
-                  <span className="text-[10px] text-gray-500 uppercase font-bold">Primary Range</span>
-                  <input 
-                    type="date" 
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className="bg-transparent text-xs text-gray-700 focus:outline-none"
-                  />
+                  <div className="flex flex-col">
+                    <span className={cn(
+                      "text-[9px] uppercase font-black leading-none mb-0.5",
+                      isMainRecent ? "text-emerald-600" : "text-amber-600"
+                    )}>
+                      {isMainRecent ? 'Current' : 'Previous'}
+                    </span>
+                    <input 
+                      type="date" 
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      className="bg-transparent text-xs text-gray-700 focus:outline-none font-bold"
+                    />
+                  </div>
                 </div>
-                <div className="w-px h-4 bg-gray-200" />
+                <div className="w-px h-6 bg-gray-200" />
                 <div className="flex items-center gap-2 px-2">
-                  <span className="text-[10px] text-gray-500 uppercase font-bold">To</span>
-                  <input 
-                    type="date" 
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className="bg-transparent text-xs text-gray-700 focus:outline-none"
-                  />
+                  <div className="flex flex-col">
+                    <span className="text-[9px] text-gray-400 uppercase font-black leading-none mb-0.5">End</span>
+                    <input 
+                      type="date" 
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      className="bg-transparent text-xs text-gray-700 focus:outline-none font-bold"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1832,13 +1844,14 @@ export default function App() {
                 <button 
                   onClick={() => setIsComparing(!isComparing)}
                   className={cn(
-                    "px-3 py-1.5 rounded-lg text-xs font-bold transition-all border",
+                    "px-3 py-2 rounded-lg text-xs font-bold transition-all border flex items-center gap-2",
                     isComparing 
                       ? "bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-600/20" 
                       : "bg-white border-gray-200 text-gray-500 hover:text-gray-700 shadow-sm"
                   )}
                 >
-                  Compare
+                  <RefreshCw className={cn("w-3 h-3", isComparing && "animate-spin-once")} />
+                  {isComparing ? 'Comparing' : 'Compare'}
                 </button>
                 
                 {isComparing && (
@@ -1852,29 +1865,39 @@ export default function App() {
                         setCompareStartDate(s);
                         setCompareEndDate(e);
                       }}
-                      className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 transition-colors"
+                      className="p-2 hover:bg-gray-100 rounded-lg text-gray-400 transition-colors border border-gray-200 bg-white"
                       title="Swap periods"
                     >
-                      <RefreshCw className="w-3 h-3" />
+                      <RefreshCw className="w-3.5 h-3.5" />
                     </button>
                     <div className="flex items-center gap-2 bg-gray-100 border border-gray-200 rounded-lg p-1 animate-in fade-in slide-in-from-left-2">
                       <div className="flex items-center gap-2 px-2">
-                        <span className="text-[10px] text-gray-500 uppercase font-bold">Compare VS</span>
-                        <input 
-                          type="date" 
-                          value={compareStartDate}
-                          onChange={(e) => setCompareStartDate(e.target.value)}
-                          className="bg-transparent text-xs text-gray-700 focus:outline-none"
-                        />
+                        <div className="flex flex-col">
+                          <span className={cn(
+                            "text-[9px] uppercase font-black leading-none mb-0.5",
+                            !isMainRecent ? "text-emerald-600" : "text-amber-600"
+                          )}>
+                            {!isMainRecent ? 'Current' : 'Previous'}
+                          </span>
+                          <input 
+                            type="date" 
+                            value={compareStartDate}
+                            onChange={(e) => setCompareStartDate(e.target.value)}
+                            className="bg-transparent text-xs text-gray-700 focus:outline-none font-bold"
+                          />
+                        </div>
                       </div>
-                      <div className="w-px h-4 bg-gray-200" />
+                      <div className="w-px h-6 bg-gray-200" />
                       <div className="flex items-center gap-2 px-2">
-                        <input 
-                          type="date" 
-                          value={compareEndDate}
-                          onChange={(e) => setCompareEndDate(e.target.value)}
-                          className="bg-transparent text-xs text-gray-700 focus:outline-none"
-                        />
+                        <div className="flex flex-col">
+                          <span className="text-[9px] text-gray-400 uppercase font-black leading-none mb-0.5">End</span>
+                          <input 
+                            type="date" 
+                            value={compareEndDate}
+                            onChange={(e) => setCompareEndDate(e.target.value)}
+                            className="bg-transparent text-xs text-gray-700 focus:outline-none font-bold"
+                          />
+                        </div>
                       </div>
                     </div>
                   </>
@@ -1909,41 +1932,85 @@ export default function App() {
         )}
 
         {/* Stats Grid */}
-        <div className={cn(
-          "grid grid-cols-1 sm:grid-cols-2 gap-6",
-          selectedGa4Property ? "lg:grid-cols-6" : "lg:grid-cols-4"
-        )}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {[
-            { label: 'Total Clicks', value: totalClicks.toLocaleString(), icon: MousePointer2, color: 'text-blue-600', bg: 'bg-blue-50' },
-            { label: 'Total Impressions', value: totalImpressions.toLocaleString(), icon: Eye, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-            { label: 'Avg. CTR', value: `${avgCtr.toFixed(2)}%`, icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-            { label: 'Avg. Position', value: avgPos.toFixed(1), icon: BarChart3, color: 'text-orange-600', bg: 'bg-orange-50' },
-            ...(selectedGa4Property ? [
-              { label: 'GA4 Conversions', value: totalGa4Events.toLocaleString(), icon: Target, color: 'text-rose-600', bg: 'bg-rose-50' },
-              { label: 'GA4 Sales', value: totalSales.toLocaleString(), icon: Target, color: 'text-emerald-600', bg: 'bg-emerald-50' }
-            ] : [])
+            { 
+              label: 'Total clicks', 
+              value: totalClicks >= 1000 ? `${(totalClicks/1000).toFixed(2)}K` : totalClicks.toLocaleString(), 
+              prevValue: compClicks >= 1000 ? `${(compClicks/1000).toFixed(2)}K` : compClicks.toLocaleString(),
+              icon: MousePointer2, 
+              iconColor: 'text-[#4285f4]',
+              currentRaw: totalClicks, 
+              prevRaw: compClicks 
+            },
+            { 
+              label: 'Total impressions', 
+              value: totalImpressions >= 1000 ? `${(totalImpressions/1000).toFixed(0)}K` : totalImpressions.toLocaleString(), 
+              prevValue: compImpressions >= 1000 ? `${(compImpressions/1000).toFixed(0)}K` : compImpressions.toLocaleString(),
+              icon: Eye, 
+              iconColor: 'text-[#7b1fa2]',
+              currentRaw: totalImpressions, 
+              prevRaw: compImpressions 
+            },
+            { 
+              label: 'Average CTR', 
+              value: `${avgCtr.toFixed(1)}%`, 
+              prevValue: `${compCtr.toFixed(1)}%`,
+              icon: TrendingUp, 
+              iconColor: 'text-[#0097a7]',
+              currentRaw: avgCtr, 
+              prevRaw: compCtr 
+            },
+            { 
+              label: 'Average position', 
+              value: avgPos.toFixed(1), 
+              prevValue: compPos.toFixed(1),
+              icon: BarChart3, 
+              iconColor: 'text-[#ef6c00]',
+              currentRaw: avgPos, 
+              prevRaw: compPos, 
+              inverse: true 
+            }
           ].map((stat, i) => (
             <motion.div 
               key={i}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.1 }}
-              className={cn(
-                "p-6 rounded-2xl bg-white border border-gray-200 hover:border-emerald-200 transition-all group shadow-sm hover:shadow-md",
-                selectedGa4Property ? "lg:col-span-1" : "lg:col-span-1"
-              )}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: i * 0.05 }}
+              className="p-4 rounded-xl shadow-sm border border-gray-200 bg-white transition-all relative overflow-hidden"
             >
-              <div className="flex justify-between items-start mb-4">
-                <span className="text-gray-500 text-sm font-semibold">{stat.label}</span>
-                <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center", stat.bg)}>
-                  <stat.icon className={cn("w-5 h-5", stat.color)} />
-                </div>
+              <div className="flex items-center gap-2 mb-3">
+                <stat.icon className={cn("w-4 h-4", stat.iconColor)} />
+                <span className="text-[11px] font-bold uppercase tracking-wide text-gray-500">{stat.label}</span>
               </div>
-              <div className="text-3xl font-bold tracking-tight text-gray-900">{stat.value}</div>
-              {stat.label === 'Total Clicks' && renderChange(totalClicks, compClicks)}
-              {stat.label === 'Total Impressions' && renderChange(totalImpressions, compImpressions)}
-              {stat.label === 'Avg. CTR' && renderChange(avgCtr, compCtr)}
-              {stat.label === 'Avg. Position' && renderChange(avgPos, compPos, true)}
+              
+              <div className="space-y-4">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="text-3xl font-bold leading-none mb-1 text-gray-900">{stat.value}</div>
+                    <div className="text-[10px] text-gray-400 font-medium">
+                      {new Date(isMainRecent ? startDate : compareStartDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'numeric', year: '2-digit' })} - {new Date(isMainRecent ? endDate : compareEndDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'numeric', year: '2-digit' })}
+                    </div>
+                  </div>
+                  {isComparing && stat.currentRaw !== undefined && renderChange(stat.currentRaw, stat.prevRaw, stat.inverse)}
+                </div>
+
+                {isComparing && (
+                  <div className="pt-3 border-t border-gray-100">
+                    <div className="text-xl font-bold text-gray-600 mb-0.5">{stat.prevValue}</div>
+                    <div className="text-[10px] text-gray-400 font-medium">
+                      {new Date(isMainRecent ? compareStartDate : startDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'numeric', year: '2-digit' })} - {new Date(isMainRecent ? compareEndDate : endDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'numeric', year: '2-digit' })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Decorative Sparkline Placeholder */}
+              <div className="absolute bottom-0 right-0 w-24 h-12 opacity-5 pointer-events-none">
+                <svg viewBox="0 0 100 40" className="w-full h-full stroke-gray-900 fill-none stroke-2">
+                  <path d="M0,35 Q15,30 25,35 T50,20 T75,25 T100,5" />
+                </svg>
+              </div>
             </motion.div>
           ))}
         </div>
