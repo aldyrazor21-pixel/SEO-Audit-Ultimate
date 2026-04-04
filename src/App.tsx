@@ -415,6 +415,45 @@ export default function App() {
     doc.save(`CTR-Optimization-Position-${position}.pdf`);
   };
 
+  const downloadAllPositionsCsv = () => {
+    const pageMap = new Map<string, { clicks: number, impressions: number }>();
+    
+    activeData.forEach(row => {
+      const page = row.keys[1];
+      if (!page) return;
+      if (excludeProduk && page.includes('/produk/')) return;
+      
+      const pos = Math.round(row.position);
+      if (pos >= 1 && pos <= 10) {
+        if (!pageMap.has(page)) {
+          pageMap.set(page, { clicks: row.clicks, impressions: row.impressions });
+        } else {
+          const stats = pageMap.get(page)!;
+          stats.clicks += row.clicks;
+          stats.impressions += row.impressions;
+        }
+      }
+    });
+
+    const csvRows = [
+      ["Page URL", "CTR (%)"],
+      ...Array.from(pageMap.entries()).map(([url, stats]) => {
+        const ctr = stats.impressions > 0 ? (stats.clicks / stats.impressions) * 100 : 0;
+        return [url, ctr.toFixed(2)];
+      })
+    ];
+
+    const csvContent = "\uFEFF" + csvRows.map(e => e.map(val => `"${val}"`).join(",")).join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `CTR-Analysis-All-Positions-1-10-${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const downloadEnrichmentPDF = (enrichmentData: any[]) => {
     const doc = new jsPDF() as any;
     
@@ -2299,8 +2338,17 @@ export default function App() {
                     </span>
                   </label>
                 </div>
-                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest bg-gray-100 px-3 py-1 rounded-full">
-                  {excludeProduk ? "Filter Active" : "No Filters"}
+                <div className="flex items-center gap-4">
+                  <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest bg-gray-100 px-3 py-1 rounded-full">
+                    {excludeProduk ? "Filter Active" : "No Filters"}
+                  </div>
+                  <button
+                    onClick={downloadAllPositionsCsv}
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition-all shadow-sm hover:shadow-md active:scale-95"
+                  >
+                    <Download className="w-4 h-4" />
+                    Download All URLs (Pos 1-10)
+                  </button>
                 </div>
               </div>
               <div className="overflow-x-auto">

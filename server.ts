@@ -4,54 +4,66 @@ import { google } from "googleapis";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
+import admin from "firebase-admin";
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Initialize Firebase Admin
+if (!admin.apps.length) {
+  admin.initializeApp({
+    projectId: process.env.VITE_FIREBASE_PROJECT_ID || JSON.parse(process.env.FIREBASE_CONFIG || "{}").projectId
+  });
+}
+
+const db = admin.firestore();
 const app = express();
 const PORT = 3000;
 
-// In-memory store for demo purposes. In a real app, use a database.
-// We'll store tokens in a simple session-like object for the current user.
-let userTokens: any = null;
-
-const appUrl = process.env.APP_URL?.replace(/\/$/, "");
-
 app.use(express.json());
+
+// Middleware to verify Firebase ID Token
+const authenticate = async (req: any, res: any, next: any) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  const idToken = authHeader.split("Bearer ")[1];
+  try {
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    req.user = decodedToken;
+    next();
+  } catch (error) {
+    res.status(401).json({ error: "Invalid token" });
+  }
+};
 
 const getRedirectUri = (req: any) => {
   const appUrl = process.env.APP_URL?.replace(/\/$/, "");
   if (appUrl) return `${appUrl}/auth/callback`;
-  
-  // Fallback to current host if APP_URL is missing
-  const protocol = req.protocol === 'https' || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
+  const protocol = req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
   return `${protocol}://${req.get('host')}/auth/callback`;
 };
 
 // Auth URL endpoint
-app.get("/api/auth/url", (req, res) => {
-  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
-    return res.status(500).json({ error: "Google Client ID or Secret missing" });
-  }
-
+app.get("/api/auth/url", authenticate, (req: any, res) => {
   const oauth2Client = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
     getRedirectUri(req)
   );
 
-  const scopes = [
-    "https://www.googleapis.com/auth/webmasters.readonly",
-    "https://www.googleapis.com/auth/analytics.readonly",
-    "https://www.googleapis.com/auth/userinfo.profile",
-  ];
-
   const url = oauth2Client.generateAuthUrl({
     access_type: "offline",
-    scope: scopes,
+    scope: [
+      "https://www.googleapis.com/auth/webmasters.readonly",
+      "https://www.googleapis.com/auth/analytics.readonly",
+      "https://www.googleapis.com/auth/userinfo.profile",
+    ],
     prompt: "consent",
+    state: req.user.uid // Pass UID to callback
   });
 
   res.json({ url });
@@ -59,7 +71,7 @@ app.get("/api/auth/url", (req, res) => {
 
 // OAuth Callback
 app.get("/auth/callback", async (req, res) => {
-  const { code } = req.query;
+  const { code, state: uid } = req.query;
   try {
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
@@ -68,7 +80,9 @@ app.get("/auth/callback", async (req, res) => {
     );
 
     const { tokens } = await oauth2Client.getToken(code as string);
-    userTokens = tokens;
+    
+    // Save tokens to Firestore for this specific user
+    await db.collection("user_tokens").doc(uid as string).set(tokens);
     
     res.send(`
       <html>
@@ -77,123 +91,82 @@ app.get("/auth/callback", async (req, res) => {
             if (window.opener) {
               window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '*');
               window.close();
-            } else {
-              window.location.href = '/';
-            }
+            } else { window.location.href = '/'; }
           </script>
-          <p>Authentication successful. This window should close automatically.</p>
+          <p>Authentication successful. Closing window...</p>
         </body>
       </html>
     `);
   } catch (error) {
-    console.error("Error exchanging code for tokens:", error);
     res.status(500).send("Authentication failed");
   }
 });
 
-app.get("/api/auth/status", (req, res) => {
-  const isConfigured = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.APP_URL);
+// Helper to get user's OAuth client
+async function getClientForUser(uid: string, req: any) {
+  const doc = await db.collection("user_tokens").doc(uid).get();
+  if (!doc.exists) return null;
+  
+  const tokens = doc.data();
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    getRedirectUri(req)
+  );
+  oauth2Client.setCredentials(tokens!);
+  return oauth2Client;
+}
+
+app.get("/api/auth/status", authenticate, async (req: any, res) => {
+  const doc = await db.collection("user_tokens").doc(req.user.uid).get();
   res.json({ 
-    connected: !!userTokens,
-    configured: isConfigured
+    connected: doc.exists,
+    configured: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
   });
 });
 
-app.post("/api/auth/logout", (req, res) => {
-  userTokens = null;
-  res.json({ success: true });
-});
-
-// GSC Data Endpoints
-app.get("/api/gsc/sites", async (req, res) => {
-  if (!userTokens) return res.status(401).json({ error: "Not connected" });
-  
+app.get("/api/gsc/sites", authenticate, async (req: any, res) => {
   try {
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      getRedirectUri(req)
-    );
-    oauth2Client.setCredentials(userTokens);
-    const searchconsole = google.searchconsole({ version: "v1", auth: oauth2Client });
+    const client = await getClientForUser(req.user.uid, req);
+    if (!client) return res.status(401).json({ error: "Not connected" });
+    const searchconsole = google.searchconsole({ version: "v1", auth: client });
     const response = await searchconsole.sites.list();
     res.json(response.data.siteEntry || []);
   } catch (error) {
-    console.error("Error fetching sites:", error);
     res.status(500).json({ error: "Failed to fetch sites" });
   }
 });
 
-app.get("/api/gsc/data", async (req, res) => {
-  if (!userTokens) return res.status(401).json({ error: "Not connected" });
-  
+app.get("/api/gsc/data", authenticate, async (req: any, res) => {
   const { siteUrl, startDate, endDate } = req.query;
-  if (!siteUrl) return res.status(400).json({ error: "siteUrl is required" });
-
   try {
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      getRedirectUri(req)
-    );
-    oauth2Client.setCredentials(userTokens);
-    const searchconsole = google.searchconsole({ version: "v1", auth: oauth2Client });
+    const client = await getClientForUser(req.user.uid, req);
+    if (!client) return res.status(401).json({ error: "Not connected" });
+    const searchconsole = google.searchconsole({ version: "v1", auth: client });
     
-    // 1. Fetch site-level summary (no dimensions) to get TRUE totals
-    const summaryResponse = await searchconsole.searchanalytics.query({
-      siteUrl: siteUrl as string,
-      requestBody: {
-        startDate: (startDate as string),
-        endDate: (endDate as string),
-      },
-    });
-
-    // 2. Fetch daily time series for the chart
-    const timeSeriesResponse = await searchconsole.searchanalytics.query({
-      siteUrl: siteUrl as string,
-      requestBody: {
-        startDate: (startDate as string),
-        endDate: (endDate as string),
-        dimensions: ["date"],
-      },
-    });
-
-    // 3. Fetch detailed rows (query/page) for the table
-    const detailsResponse = await searchconsole.searchanalytics.query({
-      siteUrl: siteUrl as string,
-      requestBody: {
-        startDate: (startDate as string),
-        endDate: (endDate as string),
-        dimensions: ["query", "page", "device", "country"],
-        rowLimit: 1000,
-      },
-    });
+    const [summary, timeSeries, details] = await Promise.all([
+      searchconsole.searchanalytics.query({ siteUrl: siteUrl as string, requestBody: { startDate: startDate as string, endDate: endDate as string } }),
+      searchconsole.searchanalytics.query({ siteUrl: siteUrl as string, requestBody: { startDate: startDate as string, endDate: endDate as string, dimensions: ["date"] } }),
+      searchconsole.searchanalytics.query({ siteUrl: siteUrl as string, requestBody: { startDate: startDate as string, endDate: endDate as string, dimensions: ["query", "page", "device", "country"], rowLimit: 1000 } })
+    ]);
 
     res.json({
-      summary: summaryResponse.data.rows?.[0] || { clicks: 0, impressions: 0, ctr: 0, position: 0 },
-      timeSeries: timeSeriesResponse.data.rows || [],
-      rows: detailsResponse.data.rows || [],
+      summary: summary.data.rows?.[0] || { clicks: 0, impressions: 0, ctr: 0, position: 0 },
+      timeSeries: timeSeries.data.rows || [],
+      rows: details.data.rows || [],
     });
   } catch (error: any) {
-    console.error("Error fetching GSC data:", error);
-    const message = error.response?.data?.error?.message || error.message || "Failed to fetch GSC data";
-    res.status(500).json({ error: message });
+    res.status(500).json({ error: error.message });
   }
 });
 
 // GA4 Data Endpoints
-app.get("/api/ga4/properties", async (req, res) => {
-  if (!userTokens) return res.status(401).json({ error: "Not connected" });
-  
+app.get("/api/ga4/properties", authenticate, async (req: any, res) => {
   try {
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      getRedirectUri(req)
-    );
-    oauth2Client.setCredentials(userTokens);
+    const client = await getClientForUser(req.user.uid, req);
+    if (!client) return res.status(401).json({ error: "Not connected" });
     
-    const analyticsadmin = google.analyticsadmin({ version: "v1beta", auth: oauth2Client });
+    const analyticsadmin = google.analyticsadmin({ version: "v1beta", auth: client });
     
     // 1. List accounts
     const accountsResponse = await analyticsadmin.accounts.list();
@@ -221,21 +194,15 @@ app.get("/api/ga4/properties", async (req, res) => {
   }
 });
 
-app.get("/api/ga4/data", async (req, res) => {
-  if (!userTokens) return res.status(401).json({ error: "Not connected" });
-  
+app.get("/api/ga4/data", authenticate, async (req: any, res) => {
   const { propertyId, startDate, endDate } = req.query;
   if (!propertyId) return res.status(400).json({ error: "propertyId is required" });
 
   try {
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      getRedirectUri(req)
-    );
-    oauth2Client.setCredentials(userTokens);
+    const client = await getClientForUser(req.user.uid, req);
+    if (!client) return res.status(401).json({ error: "Not connected" });
     
-    const analyticsdata = google.analyticsdata({ version: "v1beta", auth: oauth2Client });
+    const analyticsdata = google.analyticsdata({ version: "v1beta", auth: client });
     
     const response = await analyticsdata.properties.runReport({
       property: `properties/${propertyId}`,
@@ -274,6 +241,15 @@ app.get("/api/ga4/data", async (req, res) => {
       message = "Google Analytics Data API is not enabled. Please enable it in your Google Cloud Console: https://console.developers.google.com/apis/api/analyticsdata.googleapis.com/overview";
     }
     res.status(500).json({ error: message });
+  }
+});
+
+app.post("/api/auth/logout", authenticate, async (req: any, res) => {
+  try {
+    await db.collection("user_tokens").doc(req.user.uid).delete();
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to logout" });
   }
 });
 
