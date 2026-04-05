@@ -5,6 +5,9 @@ import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
 import admin from "firebase-admin";
+import fs from "fs";
+
+import { getFirestore } from "firebase-admin/firestore";
 
 dotenv.config();
 
@@ -12,13 +15,79 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Initialize Firebase Admin
+let databaseId: string | undefined = undefined;
+let firebaseApp: admin.app.App;
+
 if (!admin.apps.length) {
-  admin.initializeApp({
-    projectId: process.env.VITE_FIREBASE_PROJECT_ID || JSON.parse(process.env.FIREBASE_CONFIG || "{}").projectId
-  });
+  let projectId = process.env.VITE_FIREBASE_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT;
+  const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
+  
+  if (!projectId && process.env.FIREBASE_CONFIG) {
+    try {
+      const config = JSON.parse(process.env.FIREBASE_CONFIG);
+      projectId = config.projectId;
+      databaseId = config.firestoreDatabaseId;
+    } catch (e) {}
+  }
+  
+  if (!projectId) {
+    try {
+      const configPath = path.join(__dirname, "firebase-applet-config.json");
+      if (fs.existsSync(configPath)) {
+        const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+        projectId = config.projectId;
+        databaseId = config.firestoreDatabaseId;
+      }
+    } catch (e) {}
+  }
+
+  const appOptions: admin.AppOptions = {
+    projectId: projectId || "tools-ai-489804"
+  };
+
+  if (serviceAccount) {
+    try {
+      appOptions.credential = admin.credential.cert(JSON.parse(serviceAccount));
+      console.log("Using provided FIREBASE_SERVICE_ACCOUNT credentials");
+    } catch (e) {
+      console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT:", e);
+    }
+  }
+
+  console.log(`Initializing Firebase Admin for project: ${appOptions.projectId}`);
+  firebaseApp = admin.initializeApp(appOptions);
+} else {
+  firebaseApp = admin.app();
 }
 
-const db = admin.firestore();
+// Ensure databaseId is not "(default)" which can cause issues with some SDK versions
+const finalDatabaseId = (databaseId === "(default)" || !databaseId) ? undefined : databaseId;
+console.log(`Using Firestore database: ${finalDatabaseId || "(default)"}`);
+let db = getFirestore(firebaseApp, finalDatabaseId);
+
+// Test Firestore connection and handle potential permission issues with named databases
+(async () => {
+  try {
+    // Try to list collections to verify permissions
+    await db.listCollections();
+    console.log("Firestore connection verified successfully");
+  } catch (error: any) {
+    console.error("Firestore connection verification failed:", error.message);
+    if (error.message.includes("PERMISSION_DENIED") && finalDatabaseId) {
+      console.warn(`Permission denied for database ${finalDatabaseId}. Falling back to (default) database.`);
+      db = getFirestore(firebaseApp);
+      try {
+        await db.listCollections();
+        console.log("Firestore connection verified successfully with (default) database");
+      } catch (err: any) {
+        console.error("Firestore connection verification failed even with (default) database:", err.message);
+      }
+    } else if (error.message.includes("PERMISSION_DENIED")) {
+      console.error("CRITICAL: Permission denied. Please ensure the service account has 'Cloud Datastore User' or 'Firebase Admin' permissions.");
+    }
+  }
+})();
+
 const app = express();
 const PORT = 3000;
 
@@ -49,9 +118,18 @@ const getRedirectUri = (req: any) => {
 
 // Auth URL endpoint
 app.get("/api/auth/url", authenticate, (req: any, res) => {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret) {
+    return res.status(400).json({ 
+      error: "Google OAuth credentials are not configured. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in the environment variables." 
+    });
+  }
+
   const oauth2Client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
+    clientId,
+    clientSecret,
     getRedirectUri(req)
   );
 
@@ -118,11 +196,16 @@ async function getClientForUser(uid: string, req: any) {
 }
 
 app.get("/api/auth/status", authenticate, async (req: any, res) => {
-  const doc = await db.collection("user_tokens").doc(req.user.uid).get();
-  res.json({ 
-    connected: doc.exists,
-    configured: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
-  });
+  try {
+    const doc = await db.collection("user_tokens").doc(req.user.uid).get();
+    res.json({ 
+      connected: doc.exists,
+      configured: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
+    });
+  } catch (error) {
+    console.error("Auth status check failed:", error);
+    res.status(500).json({ error: "Failed to check auth status" });
+  }
 });
 
 app.get("/api/gsc/sites", authenticate, async (req: any, res) => {
@@ -175,11 +258,15 @@ app.get("/api/ga4/properties", authenticate, async (req: any, res) => {
     // 2. List properties for each account
     let allProperties: any[] = [];
     for (const account of accounts) {
-      const propertiesResponse = await analyticsadmin.properties.list({
-        filter: `parent:${account.name}`
-      });
-      if (propertiesResponse.data.properties) {
-        allProperties = [...allProperties, ...propertiesResponse.data.properties];
+      try {
+        const propertiesResponse = await analyticsadmin.properties.list({
+          filter: `parent:${account.name}`
+        });
+        if (propertiesResponse.data.properties) {
+          allProperties = [...allProperties, ...propertiesResponse.data.properties];
+        }
+      } catch (err) {
+        console.error(`Failed to fetch properties for account ${account.name}:`, err);
       }
     }
     
@@ -251,6 +338,11 @@ app.post("/api/auth/logout", authenticate, async (req: any, res) => {
   } catch (error) {
     res.status(500).json({ error: "Failed to logout" });
   }
+});
+
+// API 404 handler
+app.all("/api/*", (req, res) => {
+  res.status(404).json({ error: `API route not found: ${req.method} ${req.url}` });
 });
 
 async function startServer() {

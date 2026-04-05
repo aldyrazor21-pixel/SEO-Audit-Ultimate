@@ -147,6 +147,17 @@ export default function App() {
   const [expandedScrollPage, setExpandedScrollPage] = useState<string | null>(null);
   const [expandedErPage, setExpandedErPage] = useState<string | null>(null);
   const [expandedCtaPage, setExpandedCtaPage] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+
+  const getAuthHeaders = async () => {
+    if (!auth.currentUser) return {};
+    const token = await auth.currentUser.getIdToken();
+    return {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    };
+  };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -181,18 +192,28 @@ export default function App() {
   }, [user]);
 
   const handleLogin = async () => {
+    console.log("handleLogin clicked");
+    setIsLoggingIn(true);
+    setError(null);
     try {
       await signInWithPopup(auth, googleProvider);
-    } catch (err) {
+      console.log("Login successful");
+    } catch (err: any) {
       console.error("Login Error:", err);
-      setError("Failed to login with Google.");
+      setError("Failed to login with Google: " + (err.message || "Unknown error"));
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
   const handleLogout = async () => {
     try {
+      const headers = await getAuthHeaders();
       await signOut(auth);
-      await fetch('/api/auth/logout', { method: 'POST' });
+      await fetch('/api/auth/logout', { 
+        method: 'POST',
+        headers
+      });
       setIsConnected(false);
       setSites([]);
       setData([]);
@@ -951,8 +972,10 @@ export default function App() {
   }, []);
 
   const checkAuthStatus = async () => {
+    if (!user) return;
     try {
-      const res = await fetch('/api/auth/status');
+      const headers = await getAuthHeaders();
+      const res = await fetch('/api/auth/status', { headers });
       const status = await res.json();
       setIsConnected(status.connected);
       if (status.connected) {
@@ -967,26 +990,33 @@ export default function App() {
   };
 
   useEffect(() => {
-    setSelectedCtaPages(new Set());
-  }, [ctaSubTab]);
+    if (user) {
+      checkAuthStatus();
+    } else {
+      setIsLoading(false);
+    }
+  }, [user]);
 
   useEffect(() => {
-    setSelectedErPages(new Set());
-  }, [erSubTab]);
-
-  useEffect(() => {
-    setSelectedCtaPages(new Set());
-    setSelectedScrollPages(new Set());
-    setSelectedErPages(new Set());
-  }, [auditTab]);
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
+        setIsConnected(true);
+        setViewState('select');
+        fetchSites();
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
 
   const fetchSites = async () => {
     try {
-      const gscRes = await fetch('/api/gsc/sites');
+      const headers = await getAuthHeaders();
+      const gscRes = await fetch('/api/gsc/sites', { headers });
       const sitesData = await gscRes.json();
       setSites(sitesData);
       
-      const ga4Res = await fetch('/api/ga4/properties');
+      const ga4Res = await fetch('/api/ga4/properties', { headers });
       const ga4Data = await ga4Res.json();
       if (ga4Res.ok) {
         setGa4Properties(ga4Data);
@@ -1011,8 +1041,9 @@ export default function App() {
     setIsFetchingData(true);
     setError(null);
     try {
+      const headers = await getAuthHeaders();
       // Fetch current period
-      const res = await fetch(`/api/gsc/data?siteUrl=${encodeURIComponent(siteUrl)}&startDate=${startDate}&endDate=${endDate}`);
+      const res = await fetch(`/api/gsc/data?siteUrl=${encodeURIComponent(siteUrl)}&startDate=${startDate}&endDate=${endDate}`, { headers });
       const gscResponse = await res.json();
       
       if (res.status !== 200) {
@@ -1033,7 +1064,7 @@ export default function App() {
 
       // Fetch comparison period if enabled
       if (isComparing) {
-        const compRes = await fetch(`/api/gsc/data?siteUrl=${encodeURIComponent(siteUrl)}&startDate=${compareStartDate}&endDate=${compareEndDate}`);
+        const compRes = await fetch(`/api/gsc/data?siteUrl=${encodeURIComponent(siteUrl)}&startDate=${compareStartDate}&endDate=${compareEndDate}`, { headers });
         const compResponse = await compRes.json();
         
         if (compRes.status !== 200) {
@@ -1059,7 +1090,7 @@ export default function App() {
       if (selectedGa4Property) {
         setIsFetchingGa4(true);
         try {
-          const ga4Res = await fetch(`/api/ga4/data?propertyId=${selectedGa4Property.split('/').pop()}&startDate=${startDate}&endDate=${endDate}`);
+          const ga4Res = await fetch(`/api/ga4/data?propertyId=${selectedGa4Property.split('/').pop()}&startDate=${startDate}&endDate=${endDate}`, { headers });
           const ga4Data = await ga4Res.json();
           if (ga4Res.ok) {
             setGa4Data(ga4Data);
@@ -1082,12 +1113,25 @@ export default function App() {
   };
 
   const handleConnect = async () => {
+    console.log("handleConnect clicked");
+    setIsConnecting(true);
+    setError(null);
     try {
-      const res = await fetch('/api/auth/url');
-      const { url } = await res.json();
-      window.open(url, 'oauth_popup', 'width=600,height=700');
-    } catch (err) {
-      setError('Failed to start connection');
+      const headers = await getAuthHeaders();
+      const res = await fetch('/api/auth/url', { headers });
+      const data = await res.json();
+      
+      if (!res.ok || !data.url) {
+        throw new Error(data.error || 'Failed to get authentication URL. Please check your Google OAuth credentials in the Settings menu.');
+      }
+      
+      console.log("Opening OAuth popup:", data.url);
+      window.open(data.url, 'oauth_popup', 'width=600,height=700');
+    } catch (err: any) {
+      console.error("Connect Error:", err);
+      setError(err.message || 'Failed to start connection');
+    } finally {
+      setIsConnecting(false);
     }
   };
 
@@ -1109,6 +1153,18 @@ export default function App() {
   if (viewState === 'login') {
     return (
       <div className="min-h-screen bg-gray-50 text-gray-900 flex flex-col items-center justify-center p-6">
+        {error && (
+          <div className="max-w-md w-full mb-6 p-4 bg-red-50 border border-red-200 rounded-2xl flex items-start gap-3 text-red-600 text-sm shadow-sm">
+            <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-semibold">Error</p>
+              <p className="opacity-90">{error}</p>
+            </div>
+            <button onClick={() => setError(null)} className="p-1 hover:bg-red-100 rounded-lg transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1125,15 +1181,47 @@ export default function App() {
           </p>
           
           <div className="pt-8">
-            <button 
-              onClick={handleConnect}
-              className="group relative px-8 py-4 bg-emerald-600 text-white font-semibold rounded-full overflow-hidden transition-all hover:scale-105 active:scale-95 shadow-xl shadow-emerald-600/20"
-            >
-              <span className="relative z-10 flex items-center gap-2">
-                Connect Google Search Console
-                <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-              </span>
-            </button>
+            {!user ? (
+              <button 
+                onClick={handleLogin}
+                disabled={isLoggingIn}
+                className="group relative px-8 py-4 bg-emerald-600 text-white font-semibold rounded-full overflow-hidden transition-all hover:scale-105 active:scale-95 shadow-xl shadow-emerald-600/20 disabled:opacity-50 disabled:scale-100"
+              >
+                <span className="relative z-10 flex items-center gap-2">
+                  {isLoggingIn ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      Logging in...
+                    </>
+                  ) : (
+                    <>
+                      Login with Google
+                      <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                    </>
+                  )}
+                </span>
+              </button>
+            ) : (
+              <button 
+                onClick={handleConnect}
+                disabled={isConnecting}
+                className="group relative px-8 py-4 bg-emerald-600 text-white font-semibold rounded-full overflow-hidden transition-all hover:scale-105 active:scale-95 shadow-xl shadow-emerald-600/20 disabled:opacity-50 disabled:scale-100"
+              >
+                <span className="relative z-10 flex items-center gap-2">
+                  {isConnecting ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      Connecting...
+                    </>
+                  ) : (
+                    <>
+                      Connect Google Search Console
+                      <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                    </>
+                  )}
+                </span>
+              </button>
+            )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-16 text-left">
